@@ -1,10 +1,10 @@
-# UniChain Interoperability Oracle
+# AnyPrice — Unified Cross-Chain Oracle Access
 
 Cross-chain oracle system for distributing price data from Uniswap v4 oracles to multiple EVM chains, using Optimism's CrossL2Inbox for secure cross-chain communication.
 
 ## Overview
 
-This project implements a secure cross-chain oracle system that can distribute price data from Uniswap v4 pools across multiple EVM chains.
+AnyPrice provides a secure cross-chain oracle system that can distribute price data from Uniswap v4 pools across multiple EVM chains.
 
 The oracle system leverages Optimism's CrossDomainMessenger and CrossL2Inbox pattern to provide secure, verifiable cross-chain oracle data.
 
