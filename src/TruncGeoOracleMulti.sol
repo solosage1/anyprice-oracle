@@ -348,4 +348,19 @@ contract TruncGeoOracleMulti {
     function _blockTimestamp() internal view returns (uint32) {
         return uint32(block.timestamp);
     }
+
+    /**
+     * @notice MOCK FUNCTION FOR DEMO ONLY: Initializes a mock pool for demo purposes
+     * @param poolId The pool ID to initialize
+     * @param initialTick The initial tick value to set
+     * @dev This function is only for demo purposes and should not be used in production
+     */
+    function mockInitializePool(bytes32 poolId, int24 initialTick) external {
+        // Initialize the pool with mock data
+        maxAbsTickMove[poolId] = 100; // Mock max tick move
+        (states[poolId].cardinality, states[poolId].cardinalityNext) = observations[poolId].initialize(_blockTimestamp(), initialTick);
+        
+        // Explicitly note this is for demo purposes
+        emit OracleEnabled(poolId, 100);
+    }
 } 

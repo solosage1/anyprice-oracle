@@ -1,135 +1,74 @@
-# Unichain Interop Oracle
+# UniChain Interoperability Oracle
 
-A cross-chain interoperability oracle system for blockchain communication.
+Cross-chain oracle system for distributing price data from Uniswap v4 oracles to multiple EVM chains, using Optimism's CrossL2Inbox for secure cross-chain communication.
 
 ## Overview
 
-The Unichain Interop Oracle facilitates secure and reliable cross-chain messaging between different blockchain networks, with a focus on Optimism integration. The oracle provides:
+This project implements a secure cross-chain oracle system that can distribute price data from Uniswap v4 pools across multiple EVM chains.
 
-- Integration with Optimism's bridge (CrossDomainMessenger)
-- Complex message structures with message status tracking
-- Monitoring system for cross-chain message status
-- Testnet deployment support (Goerli, Optimism Goerli)
+The oracle system leverages Optimism's CrossDomainMessenger and CrossL2Inbox pattern to provide secure, verifiable cross-chain oracle data.
 
-## Tech Stack
+## Architecture
 
-- **Foundry**: Development toolkit for Ethereum
-- **Solidity**: Smart contract programming language
-- **Optimism**: Layer 2 scaling solution
-- **Optimism CrossDomainMessenger**: Bridge for L1-L2 communication
+The solution follows a standardized approach using the CrossL2Inbox pattern:
 
-## Project Structure
+1. **Source Chain**: 
+   - TruncGeoOracleMulti observes Uniswap v4 pools and creates reliable price oracles
+   - UniChainOracleAdapter emits standardized events for cross-chain consumption
 
-- `src/`: Smart contract source files
-- `test/`: Test files
-- `script/`: Deployment and monitoring scripts
-- `lib/`: Dependencies
+2. **Cross-Chain Bridge**:
+   - Optimism's Cross-Chain Messaging infrastructure delivers events to destination chains
+   - CrossL2Inbox provides secure verification of cross-chain events
+
+3. **Destination Chain**:
+   - CrossChainPriceResolver verifies and consumes oracle data from source chains
+   - Applications on the destination chain can query the resolver for verified price data
+
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed design documentation.
+
+## Key Components
+
+### Core Contracts
+
+- **TruncGeoOracleMulti**: Truncated geometric mean oracle for Uniswap v4
+- **TruncOracleIntegration**: Integration contract connecting TruncGeoOracle to the cross-chain system
+- **UniChainOracleAdapter**: Adapter that formats and publishes oracle data in a cross-chain compatible format
+- **CrossChainPriceResolver**: Resolver contract that consumes and validates cross-chain oracle data
+
+### Supporting Contracts
+
+- **MockL2Inbox**: Mock implementation of Optimism's CrossL2Inbox for testing
+- **UniChainOracleRegistry**: Registry that tracks oracle adapters across multiple chains
+
+## Security Features
+
+- **Replay Protection**: Events are tracked by unique IDs to prevent replay attacks
+- **Freshness Validation**: Oracle data includes timestamps and is validated for staleness
+- **Cross-Chain Verification**: Oracle data is verified through Optimism's secure CrossL2Inbox
+- **Source Authentication**: Only registered and validated source oracles are accepted
+- **Mutual Authentication**: Bidirectional authentication between components
+- **Reentrancy Protection**: Key functions are protected against reentrancy attacks
 
 ## Getting Started
 
-### Prerequisites
+See [InstallationGuide.md](./InstallationGuide.md) for detailed setup instructions.
 
-- [Foundry](https://book.getfoundry.sh/getting-started/installation)
+### Quick Start
 
-### Installation
+1. Clone the repository
+2. Install dependencies: `forge install`
+3. Run tests: `forge test`
+4. Deploy: `forge script script/OracleCrossChainDemo.s.sol --fork-url $RPC_URL --broadcast`
 
-1. Clone the repository:
-```shell
-git clone https://github.com/your-username/unichain-interop-oracle.git
-cd unichain-interop-oracle
-```
+## Demo Script
 
-2. Install dependencies:
-```shell
-forge install
-```
+The project includes a demo script (`script/OracleCrossChainDemo.s.sol`) that demonstrates the full cross-chain oracle flow:
 
-### Build
-
-```shell
-forge build
-```
-
-### Test
-
-```shell
-forge test
-```
-
-## Deployment
-
-### Setting Up Environment Variables
-
-Create an `.env` file with the necessary variables:
-
-```shell
-# Private key for deployment
-PRIVATE_KEY=your_private_key
-
-# For monitoring (optional)
-ORACLE_ADDRESS=deployed_oracle_address
-CHAIN_ID=10  # Default is Optimism
-```
-
-### Deploy to Testnets
-
-#### Goerli Testnet
-
-```shell
-forge script script/Deploy.s.sol:DeployToGoerli --rpc-url goerli --broadcast --verify
-```
-
-#### Optimism Goerli Testnet
-
-```shell
-forge script script/Deploy.s.sol:DeployToOptimismGoerli --rpc-url opgoerli --broadcast --verify
-```
-
-## Message Monitoring
-
-The project includes a monitoring system to track the status of cross-chain messages:
-
-### Monitor Messages
-
-```shell
-# Set the ORACLE_ADDRESS environment variable first
-forge script script/Monitor.s.sol:MonitorScript --rpc-url opgoerli
-```
-
-### Update Message Status
-
-```shell
-# Required environment variables: ORACLE_ADDRESS, CHAIN_ID, MESSAGE_ID, STATUS_CODE
-# STATUS_CODE: 0=NONE, 1=SENT, 2=RECEIVED, 3=CONFIRMED, 4=FAILED
-forge script script/Monitor.s.sol:UpdateMessageStatus --rpc-url opgoerli --broadcast
-```
-
-## Bridge Integration
-
-The oracle integrates with Optimism's CrossDomainMessenger for cross-chain communication. The implementation:
-
-1. Supports sending messages from L1 to L2 and vice versa
-2. Tracks message status through the entire lifecycle
-3. Uses a unique messageId to correlate messages across chains
-
-## Message Structure
-
-Messages use a structured format instead of simple bytes32 values:
-
-```solidity
-struct Message {
-    bytes32 messageId;   // Unique identifier
-    address sender;      // Address that sent the message
-    bytes payload;       // Arbitrary message data
-    uint256 timestamp;   // When the message was sent/received
-    MessageStatus status; // Current status of the message
-}
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Deploy oracle components on both source and destination chains
+2. Register the source oracle in the destination resolver
+3. Simulate a cross-chain oracle update with price data
+4. Verify the cross-chain data in the resolver
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT

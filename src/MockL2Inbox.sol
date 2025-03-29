@@ -2,7 +2,7 @@
 pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./CrossChainPriceResolver.sol";
+import "./interfaces/ICrossL2Inbox.sol";
 
 /**
  * @title MockL2Inbox
@@ -13,8 +13,21 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
     // Maps message identifier and data hash to validity
     mapping(bytes32 => mapping(bytes32 => bool)) public validMessages;
     
+    // Custom errors
+    error InvalidIdentifier();
+    error MessageNotRegistered(bytes32 idHash, bytes32 dataHash);
+    
     // Events
     event MessageRegistered(
+        uint256 indexed chainId,
+        address indexed origin,
+        uint256 logIndex,
+        uint256 blockNumber,
+        uint256 timestamp,
+        bytes32 dataHash
+    );
+    
+    event MessageUnregistered(
         uint256 indexed chainId,
         address indexed origin,
         uint256 logIndex,
@@ -32,9 +45,18 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
      * @param _dataHash Hash of the message data
      * @return Whether the message is valid
      */
-    function validateMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external view override returns (bool) {
+    function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view override returns (bool) {
+        // Verify the identifier has valid components
+        if (_id.chainId == 0 || _id.origin == address(0)) {
+            revert InvalidIdentifier();
+        }
+        
         bytes32 idHash = _getIdentifierHash(_id);
-        return validMessages[idHash][_dataHash];
+        if (!validMessages[idHash][_dataHash]) {
+            revert MessageNotRegistered(idHash, _dataHash);
+        }
+        
+        return true;
     }
     
     /**
@@ -42,11 +64,23 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
      * @param _id The message identifier
      * @param _dataHash Hash of the message data
      */
-    function registerMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
+    function registerMessage(Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
+        // Verify the identifier has valid components
+        if (_id.chainId == 0 || _id.origin == address(0)) {
+            revert InvalidIdentifier();
+        }
+        
         bytes32 idHash = _getIdentifierHash(_id);
         validMessages[idHash][_dataHash] = true;
         
-        emit MessageRegistered(_id.chainId, _id.origin, _id.logIndex, _dataHash);
+        emit MessageRegistered(
+            _id.chainId, 
+            _id.origin, 
+            _id.logIndex, 
+            _id.blockNumber,
+            _id.timestamp,
+            _dataHash
+        );
     }
     
     /**
@@ -54,9 +88,16 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
      * @param _id The message identifier
      * @param _dataHash Hash of the message data
      */
-    function unregisterMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
+    function unregisterMessage(Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
         bytes32 idHash = _getIdentifierHash(_id);
         validMessages[idHash][_dataHash] = false;
+        
+        emit MessageUnregistered(
+            _id.chainId, 
+            _id.origin, 
+            _id.logIndex, 
+            _dataHash
+        );
     }
     
     /**
@@ -64,7 +105,7 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
      * @param _id The identifier
      * @return The hash
      */
-    function _getIdentifierHash(ICrossL2Inbox.Identifier calldata _id) internal pure returns (bytes32) {
+    function _getIdentifierHash(Identifier calldata _id) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(
             _id.chainId, 
             _id.origin, 
@@ -72,5 +113,14 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
             _id.blockNumber,
             _id.timestamp
         ));
+    }
+    
+    /**
+     * @notice Utility function to get the identifier hash (for testing)
+     * @param _id The identifier
+     * @return The identifier hash
+     */
+    function getIdentifierHash(Identifier calldata _id) external pure returns (bytes32) {
+        return _getIdentifierHash(_id);
     }
 }

@@ -7,13 +7,14 @@ import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
 import {UniChainOracleAdapter} from "./UniChainOracleAdapter.sol";
 import {UniChainOracleRegistry} from "./UniChainOracleRegistry.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
  * @title TruncOracleIntegration
  * @notice Integration contract connecting TruncGeoOracleMulti to the cross-chain oracle system
- * @dev Manages the oracle adapter and handles pool data publishing
+ * @dev Manages the oracle adapter and handles pool data publishing with proper authentication
  */
-contract TruncOracleIntegration is Ownable {
+contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     // The truncated oracle being integrated
     TruncGeoOracleMulti public immutable truncGeoOracle;
     
@@ -29,9 +30,19 @@ contract TruncOracleIntegration is Ownable {
     // Registered pools with auto-publishing enabled
     mapping(bytes32 => bool) public autoPublishPools;
     
+    // Authentication mapping for mutual authentication
+    mapping(address => bool) public authorizedCallers;
+    
     // Events
     event PoolRegistered(bytes32 indexed poolId, bool autoPublish);
     event PoolDataPublished(bytes32 indexed poolId);
+    event CallerAuthorized(address indexed caller);
+    event CallerDeauthorized(address indexed caller);
+    
+    // Custom errors
+    error Unauthorized(address caller);
+    error PoolNotRegistered(bytes32 poolId);
+    error OracleUpdateFailed(bytes32 poolId, string reason);
     
     /**
      * @notice Constructor
@@ -47,14 +58,24 @@ contract TruncOracleIntegration is Ownable {
         truncGeoOracle = _truncGeoOracle;
         fullRangeHook = _fullRangeHook;
         
+        // Add the hook to authorized callers
+        authorizedCallers[_fullRangeHook] = true;
+        emit CallerAuthorized(_fullRangeHook);
+        
         // Deploy the adapter that will publish oracle data to the cross-chain system
         oracleAdapter = new UniChainOracleAdapter(_truncGeoOracle);
+        
+        // Add the adapter to authorized callers
+        authorizedCallers[address(oracleAdapter)] = true;
+        emit CallerAuthorized(address(oracleAdapter));
         
         // Connect to existing registry or deploy a new one
         if (_registryAddress != address(0)) {
             oracleRegistry = UniChainOracleRegistry(_registryAddress);
         } else {
+            // Deploy a new registry
             oracleRegistry = new UniChainOracleRegistry();
+            
             // Register our adapter in the new registry
             bytes32 adapterId = oracleRegistry.generateAdapterId(address(oracleAdapter));
             oracleRegistry.registerAdapter(
@@ -64,7 +85,33 @@ contract TruncOracleIntegration is Ownable {
                 "TruncGeoOracle Adapter",
                 "Cross-chain adapter for truncated geometric mean oracle"
             );
+            
+            // Transfer ownership of the registry to the contract owner
+            oracleRegistry.transferOwnership(owner());
         }
+    }
+    
+    /**
+     * @notice Authorizes a caller for mutual authentication
+     * @param caller The address to authorize
+     */
+    function authorizeCaller(address caller) external onlyOwner {
+        if (caller == address(0)) revert Unauthorized(caller);
+        authorizedCallers[caller] = true;
+        emit CallerAuthorized(caller);
+    }
+    
+    /**
+     * @notice Removes authorization from a caller
+     * @param caller The address to deauthorize
+     */
+    function deauthorizeCaller(address caller) external onlyOwner {
+        // Don't deauthorize critical components
+        if (caller == fullRangeHook || caller == address(oracleAdapter)) {
+            revert("Cannot deauthorize critical components");
+        }
+        authorizedCallers[caller] = false;
+        emit CallerDeauthorized(caller);
     }
     
     /**
@@ -86,20 +133,22 @@ contract TruncOracleIntegration is Ownable {
      * @param key The pool key
      * @dev Can be called manually or through the hook callback system
      */
-    function publishPoolData(PoolKey calldata key) external {
+    function publishPoolData(PoolKey calldata key) external nonReentrant {
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
-        // Only the owner or the FullRange hook can call this
-        require(
-            msg.sender == owner() || msg.sender == fullRangeHook,
-            "Unauthorized: not owner or hook"
-        );
+        // Strict mutual authentication check
+        if (!authorizedCallers[msg.sender] && msg.sender != owner()) {
+            revert Unauthorized(msg.sender);
+        }
         
-        // Publish the data through the adapter
-        oracleAdapter.publishPoolData(key);
-        
-        emit PoolDataPublished(poolIdBytes);
+        try oracleAdapter.publishPoolData(key) {
+            emit PoolDataPublished(poolIdBytes);
+        } catch Error(string memory reason) {
+            revert OracleUpdateFailed(poolIdBytes, reason);
+        } catch (bytes memory) {
+            revert OracleUpdateFailed(poolIdBytes, "unknown error");
+        }
     }
     
     /**
@@ -107,20 +156,29 @@ contract TruncOracleIntegration is Ownable {
      * @param key The pool key
      * @dev Called by the FullRange hook during its callbacks
      */
-    function hookCallback(PoolKey calldata key) external {
-        // Only the FullRange hook can call this
-        require(msg.sender == fullRangeHook, "Unauthorized: not hook");
+    function hookCallback(PoolKey calldata key) external nonReentrant {
+        // Only authorized callers can call this, with special focus on the FullRange hook
+        if (msg.sender != fullRangeHook && !authorizedCallers[msg.sender]) {
+            revert Unauthorized(msg.sender);
+        }
         
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
         // Check if auto-publishing is enabled for this pool
-        if (autoPublishPools[poolIdBytes]) {
-            // Check if the oracle should be updated
-            if (truncGeoOracle.shouldUpdateOracle(pid)) {
-                // Publish the data through the adapter
-                oracleAdapter.publishPoolData(key);
+        if (!autoPublishPools[poolIdBytes]) {
+            revert PoolNotRegistered(poolIdBytes);
+        }
+        
+        // Check if the oracle should be updated
+        if (truncGeoOracle.shouldUpdateOracle(pid)) {
+            try oracleAdapter.publishPoolData(key) {
                 emit PoolDataPublished(poolIdBytes);
+            } catch Error(string memory reason) {
+                // Log failure but don't revert to prevent blocking the main hook functionality
+                // In production, consider adding a recovery mechanism or alert system
+            } catch (bytes memory) {
+                // Same as above for non-standard errors
             }
         }
     }

@@ -4,6 +4,7 @@ pragma solidity ^0.8.26;
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
+import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 
 /**
  * @title UniChainOracleAdapter
@@ -31,6 +32,10 @@ contract UniChainOracleAdapter {
         uint32 timestamp                 // Observation timestamp
     );
     
+    // Custom errors
+    error PoolNotEnabledInOracle(bytes32 poolId);
+    error OracleDataUnchanged(bytes32 poolId, uint32 lastTimestamp);
+    
     /**
      * @notice Constructor
      * @param _truncGeoOracle The oracle to adapt for cross-chain use
@@ -50,11 +55,14 @@ contract UniChainOracleAdapter {
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
         // Get latest observation from the oracle
-        (uint32 timestamp, int24 tick, int48 tickCumulative, uint144 secondsPerLiquidityCumulativeX128) = 
-            truncGeoOracle.getLastObservation(pid);
-        
-        // Only publish if we have fresh data
-        if (timestamp > lastPublishedTimestamp[poolIdBytes]) {
+        try truncGeoOracle.getLastObservation(pid) returns (
+            uint32 timestamp, int24 tick, int48 tickCumulative, uint144 secondsPerLiquidityCumulativeX128
+        ) {
+            // Only publish if we have fresh data
+            if (timestamp <= lastPublishedTimestamp[poolIdBytes]) {
+                revert OracleDataUnchanged(poolIdBytes, lastPublishedTimestamp[poolIdBytes]);
+            }
+            
             // Get sqrtPriceX96 from the tick
             uint160 sqrtPriceX96 = _tickToSqrtPriceX96(tick);
             
@@ -70,6 +78,9 @@ contract UniChainOracleAdapter {
                 sqrtPriceX96,
                 timestamp
             );
+        } catch {
+            // Pool not enabled in oracle
+            revert PoolNotEnabledInOracle(poolIdBytes);
         }
     }
     
@@ -101,23 +112,17 @@ contract UniChainOracleAdapter {
      * @dev Uses the TickMath library from Uniswap V4
      */
     function _tickToSqrtPriceX96(int24 tick) internal pure returns (uint160) {
-        // Convert to a price using the tick and sqrt calculation
-        int24 clampedTick = tick < -887272 ? int24(-887272) : (tick > 887272 ? int24(887272) : tick);
+        // Use Uniswap's TickMath library for accurate conversion
+        int24 clampedTick = tick;
         
-        // Base value for sqrt price calculation (scaled)
-        uint160 baseValue = 79228162514264337593543950336;
-        
-        // For simplicity, we'll just use a fixed value based on tick sign
-        // In a real implementation, you would use proper sqrt price calculation
-        if (clampedTick < 0) {
-            // Lower price for negative tick (divide by 1.41 ^ |tick|)
-            return baseValue / 2;
-        } else if (clampedTick > 0) {
-            // Higher price for positive tick (multiply by 1.41 ^ tick)
-            return baseValue * 2;
-        } else {
-            // Tick is 0, return base value
-            return baseValue;
+        // Clamp to valid tick range
+        if (clampedTick < TickMath.MIN_TICK) {
+            clampedTick = TickMath.MIN_TICK;
+        } else if (clampedTick > TickMath.MAX_TICK) {
+            clampedTick = TickMath.MAX_TICK;
         }
+        
+        // Proper implementation based on Uniswap V4's TickMath
+        return TickMath.getSqrtPriceAtTick(clampedTick);
     }
-} 
+}

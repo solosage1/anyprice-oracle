@@ -2,29 +2,16 @@
 pragma solidity ^0.8.26;
 
 import "./CrossChainMessenger.sol";
+import "./interfaces/ICrossL2Inbox.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-
-// Interface for CrossL2Inbox (simplified for this implementation)
-interface ICrossL2Inbox {
-    // Identifier struct matches Optimism's standard structure for cross-chain event identification
-    struct Identifier {
-        uint256 chainId;    // Source chain ID
-        address origin;     // Source contract address
-        uint256 logIndex;   // Log index in the transaction
-        uint256 blockNumber; // Block number
-        uint256 timestamp;   // Block timestamp
-    }
-    
-    // Validates a message from another chain
-    function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view returns (bool);
-}
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
 /**
  * @title CrossChainPriceResolver
  * @notice Resolver contract that validates and consumes oracle price data from other chains
  * @dev Uses Optimism's CrossL2Inbox for secure cross-chain event validation
  */
-contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
+contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGuard {
     // Price data structure
     struct PriceData {
         int24 tick;                 // Tick value
@@ -45,6 +32,12 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
     // Timestamp threshold for freshness validation (default: 1 hour)
     uint256 public freshnessThreshold = 1 hours;
     
+    // Chain-specific time buffers to account for differences in block times
+    mapping(uint256 => uint256) public chainTimeBuffers;
+    
+    // Event replay protection: hash(chainId, origin, logIndex, blockNumber) => processed
+    mapping(bytes32 => bool) public processedEvents;
+    
     // Events
     event PriceUpdated(
         uint256 indexed sourceChainId,
@@ -56,13 +49,25 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
     event FreshnessThresholdUpdated(uint256 oldThreshold, uint256 newThreshold);
     event SourceRegistered(uint256 indexed sourceChainId, address indexed sourceAdapter);
     event SourceRemoved(uint256 indexed sourceChainId, address indexed sourceAdapter);
+    event ChainTimeBufferUpdated(uint256 indexed chainId, uint256 oldBuffer, uint256 newBuffer);
+    
+    // Errors
+    error InvalidCrossL2InboxAddress();
+    error InvalidSourceAddress();
+    error SourceNotRegistered(uint256 chainId, address source);
+    error MessageValidationFailed();
+    error EventAlreadyProcessed(bytes32 eventId);
+    error SourceMismatch(address expected, address received);
+    error ChainIdMismatch(uint256 expected, uint256 received);
+    error SourceBlockFromFuture(uint256 sourceTimestamp, uint256 currentTimestamp);
+    error PriceDataTooOld(uint32 dataTimestamp, uint256 threshold, uint256 currentTimestamp);
     
     /**
      * @notice Constructor
      * @param _crossL2Inbox Address of the CrossL2Inbox predeploy
      */
     constructor(address _crossL2Inbox) Ownable(msg.sender) {
-        require(_crossL2Inbox != address(0), "Invalid CrossL2Inbox address");
+        if (_crossL2Inbox == address(0)) revert InvalidCrossL2InboxAddress();
         crossL2Inbox = ICrossL2Inbox(_crossL2Inbox == address(0) ? CROSS_L2_INBOX : _crossL2Inbox);
     }
     
@@ -72,7 +77,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
      * @param sourceAdapter The adapter address on the source chain
      */
     function registerSource(uint256 sourceChainId, address sourceAdapter) external onlyOwner {
-        require(sourceAdapter != address(0), "Invalid source address");
+        if (sourceAdapter == address(0)) revert InvalidSourceAddress();
         validSources[sourceChainId][sourceAdapter] = true;
         emit SourceRegistered(sourceChainId, sourceAdapter);
     }
@@ -98,6 +103,17 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
     }
     
     /**
+     * @notice Sets the time buffer for a specific chain
+     * @param chainId The chain ID to set the buffer for
+     * @param buffer The time buffer in seconds
+     */
+    function setChainTimeBuffer(uint256 chainId, uint256 buffer) external onlyOwner {
+        uint256 oldBuffer = chainTimeBuffers[chainId];
+        chainTimeBuffers[chainId] = buffer;
+        emit ChainTimeBufferUpdated(chainId, oldBuffer, buffer);
+    }
+    
+    /**
      * @notice Pauses the resolver (circuit breaker)
      * @dev When paused, price updates are rejected
      */
@@ -113,36 +129,66 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
     }
     
     /**
+     * @notice Creates a unique event ID for replay protection
+     * @param _id The cross-chain event identifier
+     * @return The unique event ID
+     */
+    function _createEventId(ICrossL2Inbox.Identifier calldata _id) internal pure returns (bytes32) {
+        return keccak256(abi.encode(_id.chainId, _id.origin, _id.logIndex, _id.blockNumber));
+    }
+    
+    /**
      * @notice Updates price data from a remote chain
      * @param _id The identifier for the cross-chain event
      * @param _data The event data
      * @dev Validates the cross-chain event using Optimism's CrossL2Inbox
      */
-    function updateFromRemote(ICrossL2Inbox.Identifier calldata _id, bytes calldata _data) external whenNotPaused {
+    function updateFromRemote(ICrossL2Inbox.Identifier calldata _id, bytes calldata _data) external whenNotPaused nonReentrant {
         // Verify the source is valid
-        require(validSources[_id.chainId][_id.origin], "Invalid source");
+        if (!validSources[_id.chainId][_id.origin]) revert SourceNotRegistered(_id.chainId, _id.origin);
+        
+        // Create unique event ID for replay protection
+        bytes32 eventId = _createEventId(_id);
+        
+        // Check if event has already been processed
+        if (processedEvents[eventId]) revert EventAlreadyProcessed(eventId);
+        
+        // Mark event as processed to prevent replay attacks
+        processedEvents[eventId] = true;
         
         // Validate the message using CrossL2Inbox
-        require(crossL2Inbox.validateMessage(_id, keccak256(_data)), "Message validation failed");
+        if (!crossL2Inbox.validateMessage(_id, keccak256(_data))) revert MessageValidationFailed();
         
-        // Decode the event data
-        // Note: Event data format follows the OraclePriceUpdate event structure
-        // The first 32 bytes are event signature, so we start decoding from [32:]
-        (address source, uint256 sourceChainId, bytes32 poolId, int24 tick, uint160 sqrtPriceX96, uint32 timestamp) =
-            abi.decode(_data[32:], (address, uint256, bytes32, int24, uint160, uint32));
+        // Extract event signature and topics
+        bytes32 eventSig;
+        assembly {
+            eventSig := calldataload(add(_data.offset, 32))
+        }
+        
+        // Decode the event data internally instead of using an external call
+        (
+            address source,
+            uint256 sourceChainId,
+            bytes32 poolId,
+            int24 tick,
+            uint160 sqrtPriceX96,
+            uint32 timestamp
+        ) = _decodeEventData(_data);
         
         // Additional validations
-        require(source == _id.origin, "Source mismatch");
-        require(sourceChainId == _id.chainId, "Chain ID mismatch");
+        if (source != _id.origin) revert SourceMismatch(_id.origin, source);
+        if (sourceChainId != _id.chainId) revert ChainIdMismatch(_id.chainId, sourceChainId);
         
-        // IMPROVEMENT 1: Block timestamp validation
-        require(_id.timestamp <= block.timestamp, "Source block from future");
+        // Validate source block timestamp
+        if (_id.timestamp > block.timestamp) revert SourceBlockFromFuture(_id.timestamp, block.timestamp);
         
-        // IMPROVEMENT 2: Timestamp validation (freshness check)
-        require(
-            block.timestamp <= uint256(timestamp) + freshnessThreshold,
-            "Price data too old"
-        );
+        // Determine effective freshness threshold with chain-specific buffer
+        uint256 effectiveThreshold = freshnessThreshold + chainTimeBuffers[_id.chainId];
+        
+        // Timestamp validation (freshness check)
+        if (block.timestamp > uint256(timestamp) + effectiveThreshold) {
+            revert PriceDataTooOld(timestamp, effectiveThreshold, block.timestamp);
+        }
         
         // Check if we already have fresher data
         if (prices[_id.chainId][poolId].isValid && prices[_id.chainId][poolId].timestamp >= timestamp) {
@@ -154,6 +200,40 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
         
         // Emit event for off-chain tracking
         emit PriceUpdated(sourceChainId, poolId, tick, sqrtPriceX96, timestamp);
+    }
+    
+    /**
+     * @notice Internal helper function for decoding event data
+     * @param _data The event data to decode
+     * @return Decoded values from the event data
+     */
+    function _decodeEventData(bytes calldata _data) internal pure returns (
+        address source,
+        uint256 sourceChainId,
+        bytes32 poolId,
+        int24 tick,
+        uint160 sqrtPriceX96,
+        uint32 timestamp
+    ) {
+        // Skip the initial 32 bytes (event signature) plus 32 bytes for each indexed parameter (3 in this case)
+        (source, sourceChainId, poolId, tick, sqrtPriceX96, timestamp) = 
+            abi.decode(_data[128:], (address, uint256, bytes32, int24, uint160, uint32));
+        return (source, sourceChainId, poolId, tick, sqrtPriceX96, timestamp);
+    }
+    
+    /**
+     * @notice Helper function for decoding event data - deprecated, use internal function instead
+     * @dev This function is kept for backward compatibility but shouldn't be used in production
+     */
+    function decodeEventData(bytes calldata _data) external pure returns (
+        address source,
+        uint256 sourceChainId,
+        bytes32 poolId,
+        int24 tick,
+        uint160 sqrtPriceX96,
+        uint32 timestamp
+    ) {
+        return _decodeEventData(_data);
     }
     
     /**
@@ -174,9 +254,10 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
         bool isFresh
     ) {
         PriceData memory data = prices[chainId][poolId];
+        uint256 effectiveThreshold = freshnessThreshold + chainTimeBuffers[chainId];
         bool freshCheck = data.isValid && 
-                          (block.timestamp <= uint256(data.timestamp) + freshnessThreshold);
+                          (block.timestamp <= uint256(data.timestamp) + effectiveThreshold);
         
         return (data.tick, data.sqrtPriceX96, data.timestamp, data.isValid, freshCheck);
     }
-} 
+}
