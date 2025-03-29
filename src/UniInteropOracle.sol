@@ -1,58 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "./CrossChainMessenger.sol";
 
 /**
  * @title UniInteropOracle
  * @dev Cross-chain oracle for Unichain interoperability with Optimism integration
  */
-contract UniInteropOracle is Ownable, CrossChainMessenger {
-    // Message status enum
-    enum MessageStatus {
-        NONE,
-        SENT,
-        RECEIVED,
-        CONFIRMED,
-        FAILED
-    }
-    
-    // Complex message structure
-    struct Message {
-        bytes32 messageId;
-        address sender;
-        bytes payload;
-        uint256 timestamp;
-        MessageStatus status;
-    }
-    
+contract UniInteropOracle is CrossChainMessenger {
     // Mapping of chain ID to messages
     mapping(uint256 => mapping(bytes32 => Message)) public chainMessages;
     
     // Keep track of all message IDs by chain ID
     mapping(uint256 => bytes32[]) public messageIdsByChain;
     
-    // Optimism Goerli cross-domain messenger address
-    address public constant OPTIMISM_CROSS_DOMAIN_MESSENGER_GOERLI = 0x5086d1eEF304eb5284A0f6720f79403b4e9bE294;
-    
-    // Optimism Mainnet cross-domain messenger address
-    address public constant OPTIMISM_CROSS_DOMAIN_MESSENGER_MAINNET = 0x25ace71c97B33Cc4729CF772ae268934F7ab5fA1;
-    
-    // Events
-    event MessageReceived(uint256 indexed sourceChainId, bytes32 indexed messageId, bytes payload);
-    event MessageSent(uint256 indexed targetChainId, bytes32 indexed messageId, bytes payload);
-    event MessageStatusUpdated(uint256 indexed chainId, bytes32 indexed messageId, MessageStatus status);
-    
     constructor() Ownable(msg.sender) {}
-    
-    /**
-     * @dev Generate a unique message ID
-     */
-    function generateMessageId(address sender, bytes memory payload, uint256 timestamp) 
-        internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(sender, payload, timestamp));
-    }
     
     /**
      * @dev Record a message from another chain
