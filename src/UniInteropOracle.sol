@@ -2,12 +2,13 @@
 pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./CrossChainMessenger.sol";
 
 /**
  * @title UniInteropOracle
  * @dev Cross-chain oracle for Unichain interoperability with Optimism integration
  */
-contract UniInteropOracle is Ownable {
+contract UniInteropOracle is Ownable, CrossChainMessenger {
     // Message status enum
     enum MessageStatus {
         NONE,
@@ -98,16 +99,14 @@ contract UniInteropOracle is Ownable {
         messageIdsByChain[targetChainId].push(messageId);
         
         // Integration with Optimism's CrossDomainMessenger
-        if (targetChainId == 10 || targetChainId == 420) { // Optimism mainnet or Optimism Goerli
-            address crossDomainMessenger = targetChainId == 10 
-                ? OPTIMISM_CROSS_DOMAIN_MESSENGER_MAINNET 
-                : OPTIMISM_CROSS_DOMAIN_MESSENGER_GOERLI;
-            
+        address crossDomainMessenger = getCrossDomainMessenger(targetChainId);
+        
+        if (crossDomainMessenger != address(0)) {
             // Prepare the call to the CrossDomainMessenger
-            bytes memory callData = abi.encodeWithSignature(
-                "sendMessage(address,bytes,uint32)",
+            bytes memory callData = encodeCrossDomainCalldata(
                 address(this),  // target contract on Optimism
-                abi.encodeWithSignature("receiveMessage(uint256,bytes)", block.chainid, payload),
+                "receiveMessage(uint256,bytes)",
+                abi.encode(block.chainid, payload),
                 1000000         // gas limit
             );
             
