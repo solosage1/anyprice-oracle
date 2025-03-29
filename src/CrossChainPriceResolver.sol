@@ -272,12 +272,10 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         }
         
         // Check for abnormal timestamp (future timestamp)
-        bool isFutureTimestamp = timestamp >= block.timestamp;
+        bool isFutureTimestamp = timestamp > block.timestamp;
         if (isFutureTimestamp) {
-            // Current time is before or equal to data timestamp
-            // This could happen due to clock drift or incorrect configuration
-            hasAbnormalTimestamp[sourceChainId][poolId] = true;
-            emit AbnormalTimestamp(sourceChainId, poolId, timestamp, block.timestamp);
+            // Reject future timestamps outright to maintain data integrity
+            revert FutureTimestamp();
         }
         
         // Check if we already have fresher data

@@ -1,0 +1,28 @@
+{
+  "name": "unichain-interop-oracle",
+  "version": "1.0.0",
+  "description": "Cross-chain oracle system for distributing price data from Uniswap v4 oracles to multiple EVM chains, using Optimism's CrossL2Inbox for secure cross-chain communication.",
+  "main": "Oracle-Monitor.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solosage1/unichain-interop-oracle.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/solosage1/unichain-interop-oracle/issues"
+  },
+  "homepage": "https://github.com/solosage1/unichain-interop-oracle#readme",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "ethers": "^5.7.2"
+  }
+}

@@ -30,12 +30,14 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
     error OracleDataUnchanged(bytes32 poolId, uint32 lastTimestamp);
     error Unauthorized();
     error FutureTimestamp();
+    error ZeroAddressNotAllowed();
     
     /**
      * @notice Constructor
      * @param _truncGeoOracle The oracle to adapt for cross-chain use
      */
     constructor(TruncGeoOracleMulti _truncGeoOracle) {
+        if (address(_truncGeoOracle) == address(0)) revert ZeroAddressNotAllowed();
         truncGeoOracle = _truncGeoOracle;
         sourceChainId = block.chainid;
         truncOracleIntegration = msg.sender;

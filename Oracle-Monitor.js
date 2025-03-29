@@ -54,7 +54,8 @@ oracleAdapter.on("OraclePriceUpdate", async (source, sourceChainId, poolId, tick
         console.log(`  Chain ID: ${sourceChainId}`);
         console.log(`  Pool ID: ${poolId}`);
         console.log(`  Tick: ${tick}`);
-        console.log(`  Price: ${ethers.utils.formatUnits(sqrtPrice.pow(2).div(ethers.BigNumber.from(2).pow(192)), 18)}`);
+        const priceValue = sqrtPrice.pow(2).div(ethers.BigNumber.from(2).pow(192));
+        console.log(`  Price: ${ethers.utils.formatUnits(priceValue, 18)}`);
         console.log(`  Timestamp: ${new Date(timestamp * 1000).toISOString()}`);
         console.log(`  Block: ${event.blockNumber}, Log Index: ${event.logIndex}`);
         

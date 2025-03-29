@@ -99,9 +99,10 @@ contract OracleCrossChainDemoScript is Script {
         state.resolver.registerSource(state.sourceChainId, state.sourceAdapter);
         console.log("Source adapter registered in resolver");
         
-        // Set chain-specific time buffer
+        // Set chain-specific time buffer and increase freshness threshold
         state.resolver.setChainTimeBuffer(state.sourceChainId, 60); // 1 minute buffer
-        console.log("Chain time buffer set");
+        state.resolver.setFreshnessThreshold(4 hours); // Set a longer threshold for the demo
+        console.log("Chain time buffer and freshness threshold set");
         
         // Step 5: Set up the pool for cross-chain updates
         
@@ -144,6 +145,7 @@ contract OracleCrossChainDemoScript is Script {
         console.log("  Timestamp:", identifier.timestamp);
         
         // Use a safe timestamp for the price data - needs to be recent enough to pass freshness check
+        // But also not in the future compared to the current block time
         uint32 safePriceTimestamp = uint32(safeTimestamp > 60 ? safeTimestamp - 60 : 1); // 1 minute ago
         console.log("Price data timestamp:", safePriceTimestamp);
         
@@ -172,7 +174,7 @@ contract OracleCrossChainDemoScript is Script {
     
     function executeOracleUpdateDemo() internal {
         // Set a reasonable timestamp for testing
-        uint256 mockTimestamp = 1000000;  // Use a fixed timestamp
+        uint256 mockTimestamp = block.timestamp;  // Use current timestamp
         vm.warp(mockTimestamp);
         console.log("Setting block timestamp to:", mockTimestamp);
         

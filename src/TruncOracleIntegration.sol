@@ -225,7 +225,7 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         
         // Check if auto-publishing is enabled for this pool
         if (!state.autoPublish) {
-            revert PoolNotRegistered(poolIdBytes);
+            return; // Silently return instead of reverting to prevent hook failures
         }
         
         // Check if the oracle should be updated

@@ -188,6 +188,154 @@ oracleAdapter.on("OraclePriceUpdate", async (source, sourceChainId, poolId, tick
 4. **Rate Limiting**: Implement rate limiting for oracle updates to prevent unnecessary costs and network congestion.
 5. **Event Indexing**: For efficient event filtering, use indexed fields according to the most common query patterns.
 
+## Running the Demo and Monitor
+
+### Prerequisites
+
+1. **Foundry**: For smart contract development and testing
+   ```bash
+   curl -L https://foundry.paradigm.xyz | bash
+   foundryup
+   ```
+
+2. **Node.js and npm**: For running the monitoring script
+   ```bash
+   # Install nvm to manage Node.js versions
+   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+   
+   # Install Node.js LTS version
+   nvm install --lts
+   ```
+
+### Setting Up the Project
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/unichain-interop-oracle.git
+   cd unichain-interop-oracle
+   ```
+
+2. Install Solidity dependencies:
+   ```bash
+   forge install
+   ```
+
+3. Install JavaScript dependencies:
+   ```bash
+   npm install
+   ```
+
+### Running the Demo
+
+The demo script showcases the cross-chain oracle flow in a local development environment:
+
+1. Start a local Ethereum node with Anvil (in a separate terminal):
+   ```bash
+   anvil --chain-id 1337
+   ```
+
+2. Run the demo script:
+   ```bash
+   forge script script/OracleCrossChainDemo.s.sol --fork-url http://127.0.0.1:8545 -vv
+   ```
+
+   The script will:
+   - Deploy all necessary contracts on simulated source and destination chains
+   - Set up the oracle system with mock data
+   - Execute a cross-chain oracle update
+   - Verify the data was correctly transmitted
+
+3. To broadcast actual transactions (optional):
+   ```bash
+   forge script script/OracleCrossChainDemo.s.sol --fork-url http://127.0.0.1:8545 --broadcast
+   ```
+
+### Configuring the Monitor
+
+The monitoring script (`Oracle-Monitor.js`) demonstrates how oracle events can be monitored and relayed:
+
+1. Create a `.env` file with the following configuration:
+   ```
+   SOURCE_RPC_URL=http://127.0.0.1:8545
+   DEST_RPC_URL=http://127.0.0.1:8545
+   PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+   ORACLE_ADAPTER_ADDRESS=0x75537828f2ce51be7289709686A69CbFDbB714F1
+   RESOLVER_ADDRESS=0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
+   ```
+
+   Notes:
+   - For local testing, both RPC URLs point to Anvil
+   - The private key is Anvil's default first account
+   - Contract addresses are from the demo script output
+
+2. Start the monitor:
+   ```bash
+   node Oracle-Monitor.js
+   ```
+
+3. The monitor will:
+   - Connect to both source and destination chains
+   - Listen for OraclePriceUpdate events on the source chain
+   - Format and submit the events to the destination chain
+
+### Production Deployment
+
+For production deployment:
+
+1. Deploy to actual networks (replace RPC_URLs with your network endpoints):
+   ```bash
+   forge script script/OracleCrossChainDemo.s.sol --rpc-url $SOURCE_CHAIN_RPC --private-key $PRIVATE_KEY --broadcast
+   ```
+
+2. Configure a proper monitoring service:
+   - Use robust infrastructure with redundancy
+   - Implement proper error handling and alerting
+   - Set up automatic restart mechanisms
+   - Consider using a service like PM2, Docker, or Kubernetes
+
+3. Update the `.env` file with production values:
+   ```
+   SOURCE_RPC_URL=https://mainnet.optimism.io
+   DEST_RPC_URL=https://eth-mainnet.g.alchemy.com/v2/YOUR_API_KEY
+   PRIVATE_KEY=YOUR_PRIVATE_KEY  # Use secure environment variables
+   ORACLE_ADAPTER_ADDRESS=0x...  # Your deployed contract address
+   RESOLVER_ADDRESS=0x...        # Your deployed contract address
+   ```
+
+### Troubleshooting Demo Issues
+
+1. **Anvil Connection Issues**:
+   - Ensure Anvil is running on the default port (8545)
+   - Verify there are no other services using the same port
+
+2. **Script Execution Failures**:
+   - Check Foundry and Solidity versions
+   - Ensure all dependencies are properly installed with `forge install`
+
+3. **Monitor Connection Issues**:
+   - Verify the contract addresses in `.env` match the deployed contracts
+   - Check that the RPC endpoints are accessible
+   - Ensure the private key has sufficient funds for transactions
+
+### Extending the Demo
+
+You can extend the demo for more complex scenarios:
+
+1. **Multi-Chain Setup**:
+   ```bash
+   # Start multiple Anvil instances on different ports
+   anvil --chain-id 10 --port 8545  # Simulated Optimism
+   anvil --chain-id 1 --port 8546   # Simulated Ethereum
+   ```
+
+2. **Custom Pool Configuration**:
+   - Modify the demo script to use specific pool parameters
+   - Add multiple pools with different configurations
+
+3. **Custom Price Feeds**:
+   - Customize the oracle to use different price calculation methods
+   - Implement additional data sources
+
 ## Troubleshooting
 
 ### Common Issues

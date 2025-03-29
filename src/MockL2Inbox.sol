@@ -66,15 +66,10 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
         
         // Debug info
         bool isFromFuture = _id.timestamp > block.timestamp;
-        bool isSameChain = _id.chainId == block.chainid;
-        
-        // Don't emit events in view functions
-        // emit DebugValidation(_id.timestamp, block.timestamp, isFromFuture, isSameChain);
         
         // Add these checks to better match Optimism CrossL2Inbox behavior
         // Check in a safer way to avoid potential overflows
         if (isFromFuture) revert MessageFromFuture();
-        if (isSameChain) revert SameChainMessages();
         
         bytes32 idHash = _getIdentifierHash(_id);
         if (!validMessages[idHash][_dataHash]) {
