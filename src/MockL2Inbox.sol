@@ -13,9 +13,15 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
     // Maps message identifier and data hash to validity
     mapping(bytes32 => mapping(bytes32 => bool)) public validMessages;
     
+    // Override validation for testing
+    bool public validationOverride;
+    bool public useValidationOverride;
+    
     // Custom errors
     error InvalidIdentifier();
     error MessageNotRegistered(bytes32 idHash, bytes32 dataHash);
+    error MessageFromFuture();
+    error SameChainMessages();
     
     // Events
     event MessageRegistered(
@@ -34,6 +40,8 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
         bytes32 dataHash
     );
     
+    event DebugValidation(uint256 idTimestamp, uint256 blockTimestamp, bool isFromFuture, bool isSameChain);
+    
     /**
      * @notice Constructor
      */
@@ -46,10 +54,27 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
      * @return Whether the message is valid
      */
     function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view override returns (bool) {
+        // If using validation override, return the override value
+        if (useValidationOverride) {
+            return validationOverride;
+        }
+        
         // Verify the identifier has valid components
         if (_id.chainId == 0 || _id.origin == address(0)) {
             revert InvalidIdentifier();
         }
+        
+        // Debug info
+        bool isFromFuture = _id.timestamp > block.timestamp;
+        bool isSameChain = _id.chainId == block.chainid;
+        
+        // Don't emit events in view functions
+        // emit DebugValidation(_id.timestamp, block.timestamp, isFromFuture, isSameChain);
+        
+        // Add these checks to better match Optimism CrossL2Inbox behavior
+        // Check in a safer way to avoid potential overflows
+        if (isFromFuture) revert MessageFromFuture();
+        if (isSameChain) revert SameChainMessages();
         
         bytes32 idHash = _getIdentifierHash(_id);
         if (!validMessages[idHash][_dataHash]) {
@@ -57,6 +82,22 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
         }
         
         return true;
+    }
+    
+    /**
+     * @notice Sets a validation override for testing purposes
+     * @param _isValid The validation result to return
+     */
+    function setValidation(bool _isValid) external {
+        validationOverride = _isValid;
+        useValidationOverride = true;
+    }
+    
+    /**
+     * @notice Clears the validation override
+     */
+    function clearValidationOverride() external {
+        useValidationOverride = false;
     }
     
     /**

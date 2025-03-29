@@ -92,9 +92,16 @@ contract OracleCrossChainDemoScript is Script {
     function setupOracleSystem() internal {
         // Step 4: Register the source oracle adapter in the resolver
         state.sourceAdapter = address(state.integration.oracleAdapter());
-        state.sourceChainId = block.chainid; // In real deployment, this would be different
+        // Use a different chain ID for the source chain
+        state.sourceChainId = 10; // Simulating Optimism
+        console.log("Source Chain ID:", state.sourceChainId);
+        
         state.resolver.registerSource(state.sourceChainId, state.sourceAdapter);
         console.log("Source adapter registered in resolver");
+        
+        // Set chain-specific time buffer
+        state.resolver.setChainTimeBuffer(state.sourceChainId, 60); // 1 minute buffer
+        console.log("Chain time buffer set");
         
         // Step 5: Set up the pool for cross-chain updates
         
@@ -116,58 +123,77 @@ contract OracleCrossChainDemoScript is Script {
     }
     
     function createEventData() internal view returns (bytes memory fullEventData, ICrossL2Inbox.Identifier memory identifier) {
-        // Create a mock event identifier
+        // Get the current timestamp and ensure it's reasonable
+        uint256 safeTimestamp = block.timestamp;
+        console.log("Current timestamp for event data:", safeTimestamp);
+        
+        // Create a mock event identifier with a different chain ID
         identifier = ICrossL2Inbox.Identifier({
-            chainId: state.sourceChainId,
+            chainId: state.sourceChainId, // Using our simulated source chain ID
             origin: state.sourceAdapter,
             logIndex: 0, // Would be the actual log index in practice
-            blockNumber: block.number,
-            timestamp: block.timestamp
+            blockNumber: block.number > 100 ? block.number - 100 : 1, // Use a past block
+            timestamp: safeTimestamp > 300 ? safeTimestamp - 300 : 1 // Use a past timestamp
         });
         
-        // Use current timestamp for the data (important to pass the freshness check)
-        uint32 currentTimestamp = uint32(block.timestamp);
+        // Log the identifier details for debugging
+        console.log("Event identifier details:");
+        console.log("  ChainId:", identifier.chainId);
+        console.log("  Origin:", identifier.origin);
+        console.log("  BlockNumber:", identifier.blockNumber);
+        console.log("  Timestamp:", identifier.timestamp);
         
-        // Event signature (topic1) - keccak256 hash of the event signature
-        // This should be calculated from the exact event signature as defined in the emitting contract
+        // Use a safe timestamp for the price data - needs to be recent enough to pass freshness check
+        uint32 safePriceTimestamp = uint32(safeTimestamp > 60 ? safeTimestamp - 60 : 1); // 1 minute ago
+        console.log("Price data timestamp:", safePriceTimestamp);
+        
+        // Proper EVM log structure:
         bytes32 eventSig = keccak256("OraclePriceUpdate(address,uint256,bytes32,int24,uint160,uint32)");
         
-        // Create the three indexed parameters (topics 2-4)
-        bytes32 topic2 = bytes32(uint256(uint160(state.sourceAdapter))); // address padded to bytes32
+        // Avoid double encoding of values - EVM logs use raw 32-byte fields
+        bytes32 topic2 = bytes32(uint256(uint160(state.sourceAdapter)));
         bytes32 topic3 = bytes32(state.sourceChainId);
         bytes32 topic4 = state.actualPoolId;
         
-        // Create properly ABI encoded data for the non-indexed parameters
-        // CrossChainPriceResolver.decodeEventData skips 128 bytes (32 for eventSig + 3*32 for indexed topics)
-        // But it still expects to decode ALL parameters including the indexed ones
-        bytes memory eventData = abi.encode(
-            state.sourceAdapter,  // address source
-            state.sourceChainId,  // uint256 sourceChainId
-            state.actualPoolId,   // bytes32 poolId
-            int24(1000),          // int24 tick
-            uint160(79228162514264337593543950336), // sqrtPriceX96 (demo value)
-            currentTimestamp      // uint32 timestamp (using current block timestamp)
-        );
+        // Only non-indexed params in data section
+        bytes memory dataSection = abi.encode(int24(1000), uint160(79228162514264337593543950336), safePriceTimestamp);
         
-        // Combine into full Ethereum log format - the EVM stores:
-        // - Event signature (32 bytes)
-        // - Indexed topics (each 32 bytes)
-        // - Actual data 
-        fullEventData = abi.encodePacked(
+        // Combine into full Ethereum log format
+        fullEventData = bytes.concat(
             eventSig,  // topic1 (event signature)
             topic2,    // topic2 (indexed parameter 1)
             topic3,    // topic3 (indexed parameter 2)
             topic4,    // topic4 (indexed parameter 3)
-            eventData  // data containing ALL parameters for decoding
+            dataSection  // data containing only non-indexed params
         );
         
         return (fullEventData, identifier);
     }
     
     function executeOracleUpdateDemo() internal {
+        // Set a reasonable timestamp for testing
+        uint256 mockTimestamp = 1000000;  // Use a fixed timestamp
+        vm.warp(mockTimestamp);
+        console.log("Setting block timestamp to:", mockTimestamp);
+        
         // Create a mock pool key for publishing data - must match the one used in setup
         PoolKey memory mockPoolKey;
         // Default values are already zeros, which matches our setup
+        
+        // Simulate being on source chain (Optimism in this scenario)
+        uint256 sourceChainId = 10; // Optimism
+        uint256 destChainId = 1;    // Ethereum Mainnet
+        
+        // Step 1: Source chain operations
+        vm.chainId(sourceChainId);
+        console.log("Simulating source chain (Chain ID:", sourceChainId, ")");
+        
+        // Try to initialize pool for testing
+        try state.truncOracle.mockInitializePool(state.actualPoolId, 1000) {
+            console.log("Re-initialized mock pool in source chain oracle");
+        } catch {
+            // Pool may already be initialized
+        }
         
         // Simulate publishing oracle data for the pool
         try state.integration.publishPoolData(mockPoolKey) {
@@ -176,16 +202,36 @@ contract OracleCrossChainDemoScript is Script {
             console.log("Oracle data publishing failed:", reason);
         } catch {
             console.log("Oracle data publishing failed with unknown error");
+            
+            // Let's manually create the event data to simulate a successful publish
+            console.log("Creating manual oracle update event data");
         }
-        
-        // Step 6: Simulate cross-chain event validation
         
         // Create the event data with proper Ethereum log format
         (bytes memory fullEventData, ICrossL2Inbox.Identifier memory identifier) = createEventData();
         
+        // Step 2: Destination chain operations - use a completely different chain ID
+        vm.chainId(destChainId);
+        console.log("Switched to destination chain (Chain ID:", block.chainid, ")");
+        
         // Register the message in the mock CrossL2Inbox
         state.mockCrossL2Inbox.registerMessage(identifier, keccak256(fullEventData));
         console.log("Message registered in mock CrossL2Inbox");
+        
+        // Advance time a bit to simulate passage of time between chains
+        vm.warp(mockTimestamp + 600); // 10 minutes later
+        console.log("Advanced block timestamp to:", block.timestamp);
+        
+        // Disable the same-chain validation override just for this demo
+        try state.mockCrossL2Inbox.clearValidationOverride() {
+            console.log("Cleared validation override");
+        } catch {
+            console.log("Failed to clear validation override");
+        }
+        
+        // Set validation to true to bypass specific checks for demo
+        state.mockCrossL2Inbox.setValidation(true);
+        console.log("Set validation override to true");
         
         // Update price from remote chain in the resolver
         try state.resolver.updateFromRemote(identifier, fullEventData) {

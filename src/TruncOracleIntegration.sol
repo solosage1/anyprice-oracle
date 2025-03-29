@@ -15,6 +15,22 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  * @dev Manages the oracle adapter and handles pool data publishing with proper authentication
  */
 contract TruncOracleIntegration is Ownable, ReentrancyGuard {
+    // Custom errors
+    error Unauthorized(address caller);
+    error PoolNotRegistered(bytes32 poolId);
+    error OracleUpdateFailed(bytes32 poolId, string reason);
+    error AuthenticationMismatch(address expectedHook, address providedHook);
+    error ZeroAddressNotAllowed(string paramName);
+    
+    // Gas-optimized packed struct for pool state
+    struct PoolState {
+        bool autoPublish;
+        uint16 consecutiveFailures;
+        uint32 lastSuccessTimestamp;
+        uint32 lastUpdateTimestamp;
+        bool hasActiveAlert;
+    }
+    
     // The truncated oracle being integrated
     TruncGeoOracleMulti public immutable truncGeoOracle;
     
@@ -27,22 +43,22 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     // The oracle registry
     UniChainOracleRegistry public oracleRegistry;
     
-    // Registered pools with auto-publishing enabled
-    mapping(bytes32 => bool) public autoPublishPools;
+    // Packed pool states with comprehensive tracking
+    mapping(bytes32 => PoolState) public poolStates;
     
     // Authentication mapping for mutual authentication
     mapping(address => bool) public authorizedCallers;
+    
+    // Constants
+    uint256 public constant MAX_FAILURES_BEFORE_ALERT = 3;
     
     // Events
     event PoolRegistered(bytes32 indexed poolId, bool autoPublish);
     event PoolDataPublished(bytes32 indexed poolId);
     event CallerAuthorized(address indexed caller);
     event CallerDeauthorized(address indexed caller);
-    
-    // Custom errors
-    error Unauthorized(address caller);
-    error PoolNotRegistered(bytes32 poolId);
-    error OracleUpdateFailed(bytes32 poolId, string reason);
+    event OracleUpdateAlert(bytes32 indexed poolId, string reason, uint256 failures);
+    event AlertCleared(bytes32 indexed poolId);
     
     /**
      * @notice Constructor
@@ -57,6 +73,15 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     ) Ownable(msg.sender) {
         truncGeoOracle = _truncGeoOracle;
         fullRangeHook = _fullRangeHook;
+        
+        // Verify the truncGeoOracle accepts this integration as authorized
+        if (_truncGeoOracle.fullRangeHook() != _fullRangeHook) {
+            revert AuthenticationMismatch(_truncGeoOracle.fullRangeHook(), _fullRangeHook);
+        }
+        
+        // Additional validation for zero addresses
+        if (_truncGeoOracle == TruncGeoOracleMulti(address(0))) revert ZeroAddressNotAllowed("truncGeoOracle");
+        if (_fullRangeHook == address(0)) revert ZeroAddressNotAllowed("fullRangeHook");
         
         // Add the hook to authorized callers
         authorizedCallers[_fullRangeHook] = true;
@@ -96,7 +121,7 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
      * @param caller The address to authorize
      */
     function authorizeCaller(address caller) external onlyOwner {
-        if (caller == address(0)) revert Unauthorized(caller);
+        if (caller == address(0)) revert ZeroAddressNotAllowed("caller");
         authorizedCallers[caller] = true;
         emit CallerAuthorized(caller);
     }
@@ -108,7 +133,7 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     function deauthorizeCaller(address caller) external onlyOwner {
         // Don't deauthorize critical components
         if (caller == fullRangeHook || caller == address(oracleAdapter)) {
-            revert("Cannot deauthorize critical components");
+            revert ZeroAddressNotAllowed("Cannot deauthorize critical components");
         }
         authorizedCallers[caller] = false;
         emit CallerDeauthorized(caller);
@@ -123,7 +148,9 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
-        autoPublishPools[poolIdBytes] = autoPublish;
+        // Initialize or update the pool state
+        PoolState storage state = poolStates[poolIdBytes];
+        state.autoPublish = autoPublish;
         
         emit PoolRegistered(poolIdBytes, autoPublish);
     }
@@ -136,17 +163,47 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     function publishPoolData(PoolKey calldata key) external nonReentrant {
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
+        PoolState storage state = poolStates[poolIdBytes];
         
-        // Strict mutual authentication check
+        // Authentication check
         if (!authorizedCallers[msg.sender] && msg.sender != owner()) {
             revert Unauthorized(msg.sender);
         }
         
         try oracleAdapter.publishPoolData(key) {
             emit PoolDataPublished(poolIdBytes);
+            
+            // Update state efficiently
+            state.consecutiveFailures = 0;
+            state.lastSuccessTimestamp = uint32(block.timestamp);
+            state.lastUpdateTimestamp = uint32(block.timestamp);
+            
+            // Clear alert flag if it was set
+            if (state.hasActiveAlert) {
+                state.hasActiveAlert = false;
+                emit AlertCleared(poolIdBytes);
+            }
         } catch Error(string memory reason) {
+            state.consecutiveFailures++;
+            state.lastUpdateTimestamp = uint32(block.timestamp);
+            
+            // Only emit alert once until it's cleared
+            if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
+                state.hasActiveAlert = true;
+                emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
+            }
+            
             revert OracleUpdateFailed(poolIdBytes, reason);
         } catch (bytes memory) {
+            state.consecutiveFailures++;
+            state.lastUpdateTimestamp = uint32(block.timestamp);
+            
+            // Only emit alert once until it's cleared
+            if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
+                state.hasActiveAlert = true;
+                emit OracleUpdateAlert(poolIdBytes, "unknown error", state.consecutiveFailures);
+            }
+            
             revert OracleUpdateFailed(poolIdBytes, "unknown error");
         }
     }
@@ -164,9 +221,10 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
+        PoolState storage state = poolStates[poolIdBytes];
         
         // Check if auto-publishing is enabled for this pool
-        if (!autoPublishPools[poolIdBytes]) {
+        if (!state.autoPublish) {
             revert PoolNotRegistered(poolIdBytes);
         }
         
@@ -174,11 +232,35 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         if (truncGeoOracle.shouldUpdateOracle(pid)) {
             try oracleAdapter.publishPoolData(key) {
                 emit PoolDataPublished(poolIdBytes);
+                
+                // Update state efficiently
+                state.consecutiveFailures = 0;
+                state.lastSuccessTimestamp = uint32(block.timestamp);
+                state.lastUpdateTimestamp = uint32(block.timestamp);
+                
+                // Clear alert flag if it was set
+                if (state.hasActiveAlert) {
+                    state.hasActiveAlert = false;
+                    emit AlertCleared(poolIdBytes);
+                }
             } catch Error(string memory reason) {
-                // Log failure but don't revert to prevent blocking the main hook functionality
-                // In production, consider adding a recovery mechanism or alert system
+                state.consecutiveFailures++;
+                state.lastUpdateTimestamp = uint32(block.timestamp);
+                
+                // Only emit alert once until it's cleared
+                if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
+                    state.hasActiveAlert = true;
+                    emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
+                }
             } catch (bytes memory) {
-                // Same as above for non-standard errors
+                state.consecutiveFailures++;
+                state.lastUpdateTimestamp = uint32(block.timestamp);
+                
+                // Only emit alert once until it's cleared
+                if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
+                    state.hasActiveAlert = true;
+                    emit OracleUpdateAlert(poolIdBytes, "unknown error", state.consecutiveFailures);
+                }
             }
         }
     }

@@ -5,36 +5,31 @@ import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
+import {IOptimismBridgeAdapter} from "./interfaces/IOptimismBridgeAdapter.sol";
 
 /**
  * @title UniChainOracleAdapter
  * @notice Adapter for publishing oracle data from TruncGeoOracleMulti to the Superchain
  * @dev Emits standardized events that can be picked up by OP Supervisor and validated across chains
  */
-contract UniChainOracleAdapter {
+contract UniChainOracleAdapter is IOptimismBridgeAdapter {
     // The truncated oracle being adapted
     TruncGeoOracleMulti public immutable truncGeoOracle;
     
     // Chain ID of the current chain (set during construction)
     uint256 public immutable sourceChainId;
+
+    // Reference to the truncated oracle integration contract
+    address public immutable truncOracleIntegration;
     
     // Tracks the last published timestamp for each pool to prevent duplicate events
     mapping(bytes32 => uint32) public lastPublishedTimestamp;
     
-    // Standardized event format for cross-chain oracle updates
-    // Indexed fields enable efficient filtering by cross-chain systems
-    event OraclePriceUpdate(
-        address indexed source,          // Indexed source contract (this adapter)
-        uint256 indexed sourceChainId,   // Indexed source chain ID
-        bytes32 indexed poolId,          // Indexed pool identifier
-        int24 tick,                      // Current tick value
-        uint160 sqrtPriceX96,            // Square root price
-        uint32 timestamp                 // Observation timestamp
-    );
-    
     // Custom errors
     error PoolNotEnabledInOracle(bytes32 poolId);
     error OracleDataUnchanged(bytes32 poolId, uint32 lastTimestamp);
+    error Unauthorized();
+    error FutureTimestamp();
     
     /**
      * @notice Constructor
@@ -43,6 +38,7 @@ contract UniChainOracleAdapter {
     constructor(TruncGeoOracleMulti _truncGeoOracle) {
         truncGeoOracle = _truncGeoOracle;
         sourceChainId = block.chainid;
+        truncOracleIntegration = msg.sender;
     }
     
     /**
@@ -82,6 +78,47 @@ contract UniChainOracleAdapter {
             // Pool not enabled in oracle
             revert PoolNotEnabledInOracle(poolIdBytes);
         }
+    }
+    
+    /**
+     * @notice Publishes price data in a cross-chain compatible format
+     * @param poolId The pool identifier
+     * @param tick The current tick
+     * @param sqrtPriceX96 The square root price
+     * @param timestamp The observation timestamp
+     * @return success Whether the publication was successful
+     */
+    function publishPriceData(
+        bytes32 poolId,
+        int24 tick,
+        uint160 sqrtPriceX96,
+        uint32 timestamp
+    ) external returns (bool) {
+        // Only authorized callers
+        if (msg.sender != truncOracleIntegration) revert Unauthorized();
+        
+        // Timestamp validation
+        if (timestamp > block.timestamp) revert FutureTimestamp();
+        
+        // Rate limiting
+        if (timestamp <= lastPublishedTimestamp[poolId]) {
+            revert OracleDataUnchanged(poolId, lastPublishedTimestamp[poolId]);
+        }
+        
+        // Update timestamp tracking
+        lastPublishedTimestamp[poolId] = timestamp;
+        
+        // Emit standardized cross-chain event
+        emit OraclePriceUpdate(
+            address(this),
+            sourceChainId,
+            poolId,
+            tick,
+            sqrtPriceX96,
+            timestamp
+        );
+        
+        return true;
     }
     
     /**
