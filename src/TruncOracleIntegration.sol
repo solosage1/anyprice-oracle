@@ -7,7 +7,7 @@ import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
 import {UniChainOracleAdapter} from "./UniChainOracleAdapter.sol";
 import {UniChainOracleRegistry} from "./UniChainOracleRegistry.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title TruncOracleIntegration

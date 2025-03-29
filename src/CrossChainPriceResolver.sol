@@ -4,7 +4,7 @@ pragma solidity ^0.8.26;
 import "./CrossChainMessenger.sol";
 import "./interfaces/ICrossL2Inbox.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title CrossChainPriceResolver
@@ -205,7 +205,12 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     /**
      * @notice Internal helper function for decoding event data
      * @param _data The event data to decode
-     * @return Decoded values from the event data
+     * @return source The source address that sent the event
+     * @return sourceChainId The chain ID where the event originated
+     * @return poolId The unique identifier for the pool
+     * @return tick The tick value from the price update
+     * @return sqrtPriceX96 The square root price value in X96 format
+     * @return timestamp The timestamp when the price was observed
      */
     function _decodeEventData(bytes calldata _data) internal pure returns (
         address source,
@@ -224,6 +229,13 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     /**
      * @notice Helper function for decoding event data - deprecated, use internal function instead
      * @dev This function is kept for backward compatibility but shouldn't be used in production
+     * @param _data The event data to decode
+     * @return source The source address that sent the event
+     * @return sourceChainId The chain ID where the event originated
+     * @return poolId The unique identifier for the pool
+     * @return tick The tick value from the price update
+     * @return sqrtPriceX96 The square root price value in X96 format
+     * @return timestamp The timestamp when the price was observed
      */
     function decodeEventData(bytes calldata _data) external pure returns (
         address source,

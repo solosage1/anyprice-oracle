@@ -2,97 +2,75 @@
 pragma solidity ^0.8.26;
 
 import "forge-std/Script.sol";
-import "../src/UniInteropOracle.sol";
+import "../src/CrossChainPriceResolver.sol";
 
 contract MonitorScript is Script {
     function run() external view {
-        // Load oracle address from environment or use a default
-        address oracleAddress = vm.envOr("ORACLE_ADDRESS", address(0));
-        require(oracleAddress != address(0), "Oracle address must be provided");
+        // Get the resolver address from environment
+        address resolverAddress = vm.envAddress("RESOLVER_ADDRESS");
         
-        // Load chain ID to monitor from environment or use a default (Optimism)
+        // Get the chain ID from environment (default to Optimism mainnet)
         uint256 chainId = vm.envOr("CHAIN_ID", uint256(10));
         
-        // Create an instance of the oracle contract
-        UniInteropOracle oracle = UniInteropOracle(oracleAddress);
+        CrossChainPriceResolver resolver = CrossChainPriceResolver(resolverAddress);
         
-        // Get all message IDs for the specified chain
-        bytes32[] memory messageIds = oracle.getMessageIds(chainId);
-        
-        // Check if any messages exist
-        if (messageIds.length == 0) {
-            console.log("No messages found for chain ID:", chainId);
-            return;
-        }
-        
-        // Display monitoring information
-        console.log("===== Message Status Monitor =====");
-        console.log("Oracle address:", oracleAddress);
+        console.log("CrossChainPriceResolver Address:", resolverAddress);
         console.log("Chain ID:", chainId);
-        console.log("Total messages:", messageIds.length);
-        console.log("==============================");
         
-        // Display status for each message
-        for (uint i = 0; i < messageIds.length; i++) {
-            // Get message details
-            UniInteropOracle.Message memory message = oracle.getMessage(chainId, messageIds[i]);
-            
-            // Convert status to a readable string
-            string memory statusString;
-            if (uint(message.status) == uint(UniInteropOracle.MessageStatus.NONE)) {
-                statusString = "NONE";
-            } else if (uint(message.status) == uint(UniInteropOracle.MessageStatus.SENT)) {
-                statusString = "SENT";
-            } else if (uint(message.status) == uint(UniInteropOracle.MessageStatus.RECEIVED)) {
-                statusString = "RECEIVED";
-            } else if (uint(message.status) == uint(UniInteropOracle.MessageStatus.CONFIRMED)) {
-                statusString = "CONFIRMED";
-            } else if (uint(message.status) == uint(UniInteropOracle.MessageStatus.FAILED)) {
-                statusString = "FAILED";
-            }
-            
-            // Display message information
-            console.log("Message ID:", uint256(messageIds[i]));
-            console.log("  Status:", statusString);
-            console.log("  Sender:", message.sender);
-            console.log("  Timestamp:", message.timestamp);
-            console.log("------------------------------");
+        // Monitor registered sources
+        address[] memory validSources = getRegisteredSources(resolver, chainId);
+        console.log("==== Registered Oracle Sources ====");
+        for (uint i = 0; i < validSources.length; i++) {
+            console.log("Source:", validSources[i]);
         }
+        
+        // Show freshness parameters
+        uint256 freshnessThreshold = resolver.freshnessThreshold();
+        uint256 chainTimeBuffer = resolver.chainTimeBuffers(chainId);
+        console.log("==== Freshness Parameters ====");
+        console.log("Base Freshness Threshold:", freshnessThreshold, "seconds");
+        console.log("Chain Time Buffer:", chainTimeBuffer, "seconds");
+        console.log("Effective Threshold:", freshnessThreshold + chainTimeBuffer, "seconds");
+        
+        // Future: implement pool price monitoring
+        // To be used when specific pool IDs are available
+    }
+    
+    // Helper function to get registered sources
+    function getRegisteredSources(CrossChainPriceResolver resolver, uint256 chainId) 
+        internal view returns (address[] memory) {
+        // This is a simplification since we don't have a direct way to query all sources
+        // In a real implementation, we would need to track sources via events or other means
+        
+        // Placeholder implementation
+        address[] memory sources = new address[](0);
+        return sources;
     }
 }
 
-contract UpdateMessageStatus is Script {
+contract UpdateSourceScript is Script {
     function run() external {
-        // Load required environment variables
-        address oracleAddress = vm.envOr("ORACLE_ADDRESS", address(0));
-        require(oracleAddress != address(0), "Oracle address must be provided");
+        // Get necessary parameters from environment
+        address resolverAddress = vm.envAddress("RESOLVER_ADDRESS");
+        uint256 sourceChainId = vm.envUint("SOURCE_CHAIN_ID");
+        address sourceAdapter = vm.envAddress("SOURCE_ADAPTER");
+        bool shouldRegister = vm.envBool("SHOULD_REGISTER");
         
-        uint256 chainId = vm.envOr("CHAIN_ID", uint256(0));
-        require(chainId != 0, "Chain ID must be provided");
-        
-        string memory messageIdStr = vm.envOr("MESSAGE_ID", string(""));
-        require(bytes(messageIdStr).length > 0, "Message ID must be provided");
-        bytes32 messageId = bytes32(abi.encodePacked(messageIdStr));
-        
-        uint256 statusCode = vm.envOr("STATUS_CODE", uint256(0));
-        require(statusCode <= 4, "Invalid status code (0-4)");
-        
-        // Load private key from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
-        // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
         
-        // Update message status
-        UniInteropOracle oracle = UniInteropOracle(oracleAddress);
-        oracle.updateMessageStatus(chainId, messageId, UniInteropOracle.MessageStatus(statusCode));
+        CrossChainPriceResolver resolver = CrossChainPriceResolver(resolverAddress);
         
-        // Stop broadcasting transactions
+        if (shouldRegister) {
+            resolver.registerSource(sourceChainId, sourceAdapter);
+            console.log("Registered source:", sourceAdapter);
+            console.log("For chain ID:", sourceChainId);
+        } else {
+            resolver.removeSource(sourceChainId, sourceAdapter);
+            console.log("Removed source:", sourceAdapter);
+            console.log("For chain ID:", sourceChainId);
+        }
+        
         vm.stopBroadcast();
-        
-        console.log("Message status updated");
-        console.log("Chain ID:", chainId);
-        console.log("Message ID:", uint256(messageId));
-        console.log("New Status:", statusCode);
     }
 } 

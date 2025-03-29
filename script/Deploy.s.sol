@@ -2,68 +2,58 @@
 pragma solidity ^0.8.26;
 
 import "forge-std/Script.sol";
-import "../src/UniInteropOracle.sol";
+import "../src/CrossChainPriceResolver.sol";
+import "../src/MockL2Inbox.sol";
 
 contract DeployScript is Script {
     function run() external {
         // Load private key from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
-        // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
-        
-        // Deploy the oracle contract
-        UniInteropOracle oracle = new UniInteropOracle();
-        
-        // Stop broadcasting transactions
+
+        // Deploy MockL2Inbox for testing
+        MockL2Inbox mockInbox = new MockL2Inbox();
+        console.log("MockL2Inbox deployed at:", address(mockInbox));
+
+        // Deploy CrossChainPriceResolver
+        CrossChainPriceResolver resolver = new CrossChainPriceResolver(address(mockInbox));
+        console.log("CrossChainPriceResolver deployed at:", address(resolver));
+
         vm.stopBroadcast();
-        
-        // Log the deployed contract address
-        console.log("UniInteropOracle deployed at:", address(oracle));
-        console.log("Chain ID:", block.chainid);
     }
 }
 
 contract DeployToGoerli is Script {
     function run() external {
-        // This script is specifically for deploying to Ethereum Goerli (chain ID 5)
-        require(block.chainid == 5, "This script is intended to be run on Goerli");
-        
         // Load private key from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
-        // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
-        
-        // Deploy the oracle contract
-        UniInteropOracle oracle = new UniInteropOracle();
-        
-        // Stop broadcasting transactions
+
+        // Deploy MockL2Inbox for testing on Goerli
+        MockL2Inbox mockInbox = new MockL2Inbox();
+        console.log("MockL2Inbox deployed to Goerli at:", address(mockInbox));
+
+        // Deploy CrossChainPriceResolver to Goerli
+        CrossChainPriceResolver resolver = new CrossChainPriceResolver(address(mockInbox));
+        console.log("CrossChainPriceResolver deployed to Goerli at:", address(resolver));
+
         vm.stopBroadcast();
-        
-        // Log the deployed contract address
-        console.log("UniInteropOracle deployed to Goerli at:", address(oracle));
     }
 }
 
 contract DeployToOptimismGoerli is Script {
     function run() external {
-        // This script is specifically for deploying to Optimism Goerli (chain ID 420)
-        require(block.chainid == 420, "This script is intended to be run on Optimism Goerli");
-        
         // Load private key from environment
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
-        
-        // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
         
-        // Deploy the oracle contract
-        UniInteropOracle oracle = new UniInteropOracle();
+        // On Optimism, use the actual CrossL2Inbox address
+        address crossL2Inbox = 0x4200000000000000000000000000000000000022;
         
-        // Stop broadcasting transactions
+        // Deploy CrossChainPriceResolver to Optimism Goerli
+        CrossChainPriceResolver resolver = new CrossChainPriceResolver(crossL2Inbox);
+        console.log("CrossChainPriceResolver deployed to Optimism Goerli at:", address(resolver));
+
         vm.stopBroadcast();
-        
-        // Log the deployed contract address
-        console.log("UniInteropOracle deployed to Optimism Goerli at:", address(oracle));
     }
 } 
