@@ -2,22 +2,14 @@
 pragma solidity ^0.8.26;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./CrossChainPriceResolver.sol";
 
 /**
- * @title MockCrossL2Inbox
+ * @title MockL2Inbox
  * @notice Mock implementation of Optimism's CrossL2Inbox for local testing
  * @dev Simulates the behavior of the CrossL2Inbox predeploy used in Optimism
  */
-contract MockCrossL2Inbox is Ownable {
-    // Identifier struct matching Optimism's standard
-    struct Identifier {
-        uint256 chainId;    // Source chain ID
-        address origin;     // Source contract address
-        uint256 logIndex;   // Log index in the transaction
-        uint256 blockNumber; // Block number (added to match full spec)
-        uint256 timestamp;  // Block timestamp (added to match full spec)
-    }
-    
+contract MockL2Inbox is Ownable, ICrossL2Inbox {
     // Maps message identifier and data hash to validity
     mapping(bytes32 => mapping(bytes32 => bool)) public validMessages;
     
@@ -40,7 +32,7 @@ contract MockCrossL2Inbox is Ownable {
      * @param _dataHash Hash of the message data
      * @return Whether the message is valid
      */
-    function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view returns (bool) {
+    function validateMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external view override returns (bool) {
         bytes32 idHash = _getIdentifierHash(_id);
         return validMessages[idHash][_dataHash];
     }
@@ -50,7 +42,7 @@ contract MockCrossL2Inbox is Ownable {
      * @param _id The message identifier
      * @param _dataHash Hash of the message data
      */
-    function registerMessage(Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
+    function registerMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
         bytes32 idHash = _getIdentifierHash(_id);
         validMessages[idHash][_dataHash] = true;
         
@@ -62,7 +54,7 @@ contract MockCrossL2Inbox is Ownable {
      * @param _id The message identifier
      * @param _dataHash Hash of the message data
      */
-    function unregisterMessage(Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
+    function unregisterMessage(ICrossL2Inbox.Identifier calldata _id, bytes32 _dataHash) external onlyOwner {
         bytes32 idHash = _getIdentifierHash(_id);
         validMessages[idHash][_dataHash] = false;
     }
@@ -72,7 +64,7 @@ contract MockCrossL2Inbox is Ownable {
      * @param _id The identifier
      * @return The hash
      */
-    function _getIdentifierHash(Identifier calldata _id) internal pure returns (bytes32) {
+    function _getIdentifierHash(ICrossL2Inbox.Identifier calldata _id) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(
             _id.chainId, 
             _id.origin, 

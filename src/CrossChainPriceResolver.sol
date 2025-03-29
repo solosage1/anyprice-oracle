@@ -2,7 +2,22 @@
 pragma solidity ^0.8.26;
 
 import "./CrossChainMessenger.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+
+// Interface for CrossL2Inbox (simplified for this implementation)
+interface ICrossL2Inbox {
+    // Identifier struct matches Optimism's standard structure for cross-chain event identification
+    struct Identifier {
+        uint256 chainId;    // Source chain ID
+        address origin;     // Source contract address
+        uint256 logIndex;   // Log index in the transaction
+        uint256 blockNumber; // Block number
+        uint256 timestamp;   // Block timestamp
+    }
+    
+    // Validates a message from another chain
+    function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view returns (bool);
+}
 
 /**
  * @title CrossChainPriceResolver
@@ -10,21 +25,6 @@ import "@openzeppelin/contracts/security/Pausable.sol";
  * @dev Uses Optimism's CrossL2Inbox for secure cross-chain event validation
  */
 contract CrossChainPriceResolver is CrossChainMessenger, Pausable {
-    // Interface for CrossL2Inbox (simplified for this implementation)
-    interface ICrossL2Inbox {
-        // Identifier struct matches Optimism's standard structure for cross-chain event identification
-        struct Identifier {
-            uint256 chainId;    // Source chain ID
-            address origin;     // Source contract address
-            uint256 logIndex;   // Log index in the transaction
-            uint256 blockNumber; // Block number
-            uint256 timestamp;   // Block timestamp
-        }
-        
-        // Validates a message from another chain
-        function validateMessage(Identifier calldata _id, bytes32 _dataHash) external view returns (bool);
-    }
-    
     // Price data structure
     struct PriceData {
         int24 tick;                 // Tick value

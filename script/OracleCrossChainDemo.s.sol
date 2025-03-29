@@ -72,17 +72,15 @@ contract OracleCrossChainDemoScript is Script {
         PoolKey memory mockPoolKey;
         // In a real implementation, this would be populated with actual pool data
         
+        // For demo purposes, we'll skip enabling the oracle and use mock data
+        console.log("Using mock oracle data (skipping oracle enabling due to access control)");
+        
         // Register the pool for auto-publishing
         integration.registerPool(mockPoolKey, true);
         console.log("Pool registered for auto-publishing");
         
-        // Simulate publishing oracle data for the pool
-        integration.publishPoolData(mockPoolKey);
-        console.log("Oracle data published on source chain");
-        
-        // Step 6: Simulate cross-chain event validation
-        // In reality, this would happen through OP Supervisor and CrossDomainMessenger
-        
+        // Since we can't use the real oracle data, we'll simulate it:
+        // First register mock data in the inbox directly
         // Create a mock event identifier
         ICrossL2Inbox.Identifier memory identifier = 
             ICrossL2Inbox.Identifier({
@@ -94,7 +92,6 @@ contract OracleCrossChainDemoScript is Script {
             });
         
         // Create mock event data (would be the actual event data in practice)
-        // Format must match OraclePriceUpdate event structure
         bytes memory eventData = abi.encode(
             bytes32(0), // Event signature (placeholder)
             sourceAdapter,
