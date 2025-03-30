@@ -64,7 +64,7 @@ AnyPrice directly addresses the hackathon theme by demonstrating powerful intero
 ```mermaid
 graph TD
     subgraph "Chain A (e.g., Base Sepolia)"
-        A[TruncGeoOracleMulti (Uniswap V4 Oracle)] -->|Fetch Price| B(PriceSenderAdapter)
+        A["TruncGeoOracleMulti (Uniswap V4 Oracle)"] -->|Fetch Price| B(PriceSenderAdapter)
         B -->|sendMessage| C[L2ToL2CrossDomainMessenger Predeploy]
         style C fill:#f9f,stroke:#333
     end
@@ -249,7 +249,7 @@ The result will be the `PriceData` struct fields: `(tick, sqrtPriceX96, timestam
 | `L2ToL2CrossDomainMessenger`   | A & B | **(Optimism Predeploy)** Canonical contract handling L2-to-L2 messaging | `sendMessage`, `relayMessage`, Secure cross-domain context propagation    |
 
 
-## 🔒 Security Overview (Condensed)
+## 🔒 Security Overview
 
 AnyPrice relies on the security of the underlying Optimism L2-to-L2 messaging protocol and incorporates these key contract-level safeguards:
 
@@ -260,11 +260,6 @@ AnyPrice relies on the security of the underlying Optimism L2-to-L2 messaging pr
 *   **Reentrancy Guard:** Used in `PriceReceiverResolver` to prevent reentrancy attacks.
 *   **Oracle Data Quality:** The system's accuracy depends on the reliability and security of the source oracle (`TruncGeoOracleMulti`) on Chain A.
 *   **Dependencies:** Relies on the security and liveness of Optimism's L2 messaging infrastructure and relayers.
-
-## 💡 Extending It
-* Add adapters for Chainlink, Pyth, other custom oracles.
-* Integrate with DEXs, lending platforms, liquidation bots.
-* Explore alternative messaging layers (e.g., CCIP, Hyperlane) by creating new adapter pairs.
 
 ## 🏁 Final Thoughts
 
