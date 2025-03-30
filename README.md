@@ -1,126 +1,146 @@
-# AnyPrice — Unified Cross-Chain Oracle Access
+# 📡 AnyPrice — Unified Cross-Chain Oracle Access
 
-Cross-chain oracle system for distributing price data from Uniswap v4 oracles to multiple EVM chains, using Optimism's CrossL2Inbox for secure cross-chain communication.
+**⚡ Fetch real-time asset prices from any chain, using a single call. Modular. Composable. No lock-in.**
 
-## Overview
+## 🚀 What It Does
 
-AnyPrice provides a secure cross-chain oracle system that can distribute price data from Uniswap v4 pools across multiple EVM chains.
+AnyPrice is a cross-chain oracle framework that lets your dApp on Optimism (or any L2) fetch price data from remote chains like UniChain as if it were local.
 
-The oracle system leverages Optimism's CrossDomainMessenger and CrossL2Inbox pattern to provide secure, verifiable cross-chain oracle data.
+### Use Case
 
-## Architecture
+You're on Optimism. The asset you want to price only has liquidity on UniChain.
 
-The solution follows a standardized approach using the CrossL2Inbox pattern:
+**Normally? You'd need to:**
+* Bridge data manually
+* Set up custom relayers
+* Handle async flows
+* Deal with mismatched oracle formats
 
-1. **Source Chain**: 
-   - TruncGeoOracleMulti observes Uniswap v4 pools and creates reliable price oracles
-   - UniChainOracleAdapter emits standardized events for cross-chain consumption
+**With AnyPrice, you just call:**
 
-2. **Cross-Chain Bridge**:
-   - Optimism's Cross-Chain Messaging infrastructure delivers events to destination chains
-   - CrossL2Inbox provides secure verification of cross-chain events
+```solidity
+CrossChainPriceResolver.resolvePrice("TOKEN", uniChainId);
+```
 
-3. **Destination Chain**:
-   - CrossChainPriceResolver verifies and consumes oracle data from source chains
-   - Applications on the destination chain can query the resolver for verified price data
+✅ You get a fresh, validated price  
+✅ Backed by registered oracle adapters  
+✅ Delivered cross-chain via L2-native messaging
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for detailed design documentation.
+## 🧱 How It Works
 
-## Key Components
+### 🛰 1. Oracle Adapter System
 
-### Core Contracts
+Each chain (e.g., UniChain) hosts its own OracleRegistry, which maps token symbols to custom OracleAdapters.
 
-- **TruncGeoOracleMulti**: Truncated geometric mean oracle for Uniswap v4
-- **TruncOracleIntegration**: Integration contract connecting TruncGeoOracle to the cross-chain system
-- **UniChainOracleAdapter**: Adapter that formats and publishes oracle data in a cross-chain compatible format
-- **CrossChainPriceResolver**: Resolver contract that consumes and validates cross-chain oracle data
+Adapters implement a unified interface to fetch raw prices from native oracles.
 
-### Supporting Contracts
+### 🔁 2. Cross-Chain Messaging
 
-- **MockL2Inbox**: Mock implementation of Optimism's CrossL2Inbox for testing
-- **UniChainOracleRegistry**: Registry that tracks oracle adapters across multiple chains
+Using the CrossChainMessenger (based on Optimism's ICrossDomainMessenger), price requests are routed to the target chain, processed, and responded to.
 
-## Security Features
+### 🧠 3. Local Price Resolution
 
-- **Replay Protection**: Events are tracked by unique IDs to prevent replay attacks
-- **Freshness Validation**: Oracle data includes timestamps and is validated for staleness
-- **Cross-Chain Verification**: Oracle data is verified through Optimism's secure CrossL2Inbox
-- **Source Authentication**: Only registered and validated source oracles are accepted
-- **Mutual Authentication**: Bidirectional authentication between components
-- **Reentrancy Protection**: Key functions are protected against reentrancy attacks
+CrossChainPriceResolver acts as the main interface. It abstracts away messaging, validation, and normalization. For the dApp, it looks like a single unified price feed.
 
-## Frequently Asked Questions
+## 📦 Architecture Overview
 
-For detailed information about how the system works, deployment instructions, and technical details, see our [FAQ](./FAQ.md).
+```
++--------------------------+
+|  Your dApp (Optimism)    |
+|    ↳ resolvePrice()      |
++-----------+--------------+
+            |
+            v
++--------------------------+
+| CrossChainPriceResolver  |
++-----------+--------------+
+            |
+            v
++--------------------------+
+| CrossChainMessenger      |
+| ↳ Sends req to UniChain  |
++-----------+--------------+
+            |
+            v
++--------------------------+
+| UniChainOracleRegistry   |
+| ↳ Adapter fetches price  |
++--------------------------+
+```
 
-## Getting Started
+## 🛠 Contracts Breakdown
 
-See [InstallationGuide.md](./InstallationGuide.md) for detailed setup instructions.
+| Contract | Purpose |
+|----------|---------|
+| CrossChainPriceResolver | Main interface to fetch price |
+| CrossChainMessenger | Manages cross-chain messaging |
+| UniChainOracleRegistry | Maps symbols to adapters |
+| UniChainOracleAdapter | Fetches price from local oracle |
+| ICrossL2Inbox | Interface for message send |
+| IOptimismBridgeAdapter | Abstract bridge transport |
+| TruncOracleIntegration | Example integration |
+| OracleCrossChainDemo.s.sol | End-to-end test + deployment |
 
-### Quick Start
+## 🧪 Demo Walkthrough
 
-1. Clone the repository
-2. Install dependencies: `forge install`
-3. Run tests: `forge test`
-4. Deploy: `forge script script/OracleCrossChainDemo.s.sol --fork-url $RPC_URL --broadcast`
+### Prerequisites
+* Foundry installed
+* Local forks or testnets for Optimism + UniChain
+* Set up .env with RPC URLs + private key
 
-## Demo Script
+### 1. Deploy Everything
 
-The project includes a demo script (`script/OracleCrossChainDemo.s.sol`) that demonstrates the full cross-chain oracle flow:
+```bash
+forge script script/OracleCrossChainDemo.s.sol \
+  --broadcast --verify --rpc-url $OPTIMISM_RPC
+```
 
-1. Deploy oracle components on both source and destination chains
-2. Register the source oracle in the destination resolver
-3. Simulate a cross-chain oracle update with price data
-4. Verify the cross-chain data in the resolver
+This:
+* Deploys the registry, adapters, resolver, and messenger
+* Registers symbols
+* Mocks oracle prices on UniChain
 
-### Running the Demo
+### 2. Trigger Cross-Chain Price Fetch
 
-To run the demo locally:
+```solidity
+price = resolver.resolvePrice("ETH", uniChainId);
+```
 
-1. Start a local Ethereum node with Anvil:
-   ```bash
-   anvil --chain-id 1337
-   ```
+Behind the scenes:
+* Request is sent to UniChain
+* Adapter pulls price from native oracle
+* Response is sent back and cached locally
 
-2. In a new terminal, run the demo script:
-   ```bash
-   forge script script/OracleCrossChainDemo.s.sol --fork-url http://127.0.0.1:8545 -vv
-   ```
+### 3. Consume in Your App
 
-3. To broadcast transactions to the local node:
-   ```bash
-   forge script script/OracleCrossChainDemo.s.sol --fork-url http://127.0.0.1:8545 --broadcast
-   ```
+```solidity
+uint price = CrossChainPriceResolver.resolvePrice("DAI", uniChainId);
+doSomething(price);
+```
 
-## Oracle Monitor
+## 🧠 Why This Matters
 
-The project includes a JavaScript monitor (`Oracle-Monitor.js`) that demonstrates how to monitor oracle events and relay them across chains:
+| Feature | AnyPrice | Chainlink CCIP | Custom Relayers |
+|---------|----------|----------------|-----------------|
+| Modular Oracle Adapters | ✅ | ❌ | ❌ |
+| Works Across Any L2 | ✅ | ❓ | ✅ |
+| Native Oracle Format Support | ✅ | ❌ | ❓ |
+| Dev UX: Single Function Call | ✅ | ❌ | ❌ |
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+## 💡 Extending It
+* Add adapters for Chainlink, Pyth, custom oracles
+* Plug into any app that uses price feeds (DEX, lending, liquidation bots)
+* Swap messaging layer with CCIP, Hyperlane, LayerZero if needed
 
-2. Configure environment variables in `.env`:
-   ```
-   SOURCE_RPC_URL=http://127.0.0.1:8545
-   DEST_RPC_URL=http://127.0.0.1:8545
-   PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
-   ORACLE_ADAPTER_ADDRESS=0x75537828f2ce51be7289709686A69CbFDbB714F1
-   RESOLVER_ADDRESS=0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9
-   ```
+## 🏁 Final Thoughts
 
-3. Start the monitor:
-   ```bash
-   node Oracle-Monitor.js
-   ```
+AnyPrice makes cross-chain price feeds composable, modular, and dev-friendly.
 
-The monitor will listen for oracle events on the source chain and forward them to the destination chain.
+* No more waiting for someone to deploy Chainlink on your favorite L2.
+* No more brittle relayer scripts.
+* Just plug in and price.
 
-## License
+## 👨‍💻 Author
 
-This project is licensed under the Business Source License 1.1 (BUSL-1.1).
-
-- The license restricts production use until the Change Date (June 15, 2027).
-- After the Change Date, the license converts to MIT.
-- For additional use grants or more information, see the [LICENSE](./LICENSE) file.
+Built for the Unichain x Optimism Hackathon  
+By Bryan Gross — [@bryangross on X](https://twitter.com/bryangross)
