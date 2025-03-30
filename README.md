@@ -72,7 +72,7 @@ CrossChainPriceResolver acts as the main interface. It abstracts away messaging,
 
 Watch a demonstration of AnyPrice in action:
 
-https://www.loom.com/share/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1
+[Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1)
 
 ## 🛠 Contracts Breakdown
 
