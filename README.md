@@ -87,7 +87,7 @@ graph TD
 
 Watch a demonstration of AnyPrice in action:
 
-[Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1)
+[Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f2402602fc534d9eafdf477428d8d53b?sid=0282eb3b-5422-4167-9516-a8375963c187)
 
 ## 🛠 Contracts Breakdown
 
