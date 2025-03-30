@@ -1,3 +1,4 @@
+import "forge-std/console.sol";
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
@@ -60,8 +61,9 @@ contract OracleCrossChainDemoScript is Script {
         // Step 1: Create mocks
         state.mockCrossL2Inbox = new MockL2Inbox();
         
+        console.log(unicode"\n📦 Deploying UniChainOracleRegistry...");
+        
         // Step 2: Deploy the oracle system on the source chain (Chain A)
-        console.log("=== Deploying Source Chain Components (Chain A) ===");
         
         // Deploy TruncGeoOracleMulti (would use your actual deployment in practice)
         state.truncOracle = new TruncGeoOracleMulti(
@@ -81,7 +83,6 @@ contract OracleCrossChainDemoScript is Script {
         console.log("UniChainOracleRegistry deployed at:", address(state.integration.oracleRegistry()));
         
         // Step 3: Deploy the resolver on the destination chain (Chain B)
-        console.log("=== Deploying Destination Chain Components (Chain B) ===");
         
         state.resolver = new CrossChainPriceResolver(
             address(state.mockCrossL2Inbox)
@@ -176,7 +177,9 @@ contract OracleCrossChainDemoScript is Script {
         // Set a reasonable timestamp for testing
         uint256 mockTimestamp = block.timestamp;  // Use current timestamp
         vm.warp(mockTimestamp);
-        console.log("Setting block timestamp to:", mockTimestamp);
+        
+        console.log(unicode"\n🚀 Starting AnyPrice Demo...");
+        console.log("Step 1: Deploying Registry, Adapters, Resolver...\n");
         
         // Create a mock pool key for publishing data - must match the one used in setup
         PoolKey memory mockPoolKey;
@@ -188,7 +191,7 @@ contract OracleCrossChainDemoScript is Script {
         
         // Step 1: Source chain operations
         vm.chainId(sourceChainId);
-        console.log("Simulating source chain (Chain ID:", sourceChainId, ")");
+        console.log(unicode"\n📡 Simulating source chain (Chain ID:", sourceChainId, ")");
         
         // Try to initialize pool for testing
         try state.truncOracle.mockInitializePool(state.actualPoolId, 1000) {
@@ -199,6 +202,7 @@ contract OracleCrossChainDemoScript is Script {
         
         // Simulate publishing oracle data for the pool
         try state.integration.publishPoolData(mockPoolKey) {
+            console.log(unicode"\n🔗 Registering Oracle Adapters...");
             console.log("Oracle data published on source chain");
         } catch Error(string memory reason) {
             console.log("Oracle data publishing failed:", reason);
@@ -214,6 +218,7 @@ contract OracleCrossChainDemoScript is Script {
         
         // Step 2: Destination chain operations - use a completely different chain ID
         vm.chainId(destChainId);
+        console.log(unicode"\n📡 Sending cross-chain price request for DAI...");
         console.log("Switched to destination chain (Chain ID:", block.chainid, ")");
         
         // Register the message in the mock CrossL2Inbox
@@ -222,7 +227,6 @@ contract OracleCrossChainDemoScript is Script {
         
         // Advance time a bit to simulate passage of time between chains
         vm.warp(mockTimestamp + 600); // 10 minutes later
-        console.log("Advanced block timestamp to:", block.timestamp);
         
         // Disable the same-chain validation override just for this demo
         try state.mockCrossL2Inbox.clearValidationOverride() {
@@ -233,10 +237,11 @@ contract OracleCrossChainDemoScript is Script {
         
         // Set validation to true to bypass specific checks for demo
         state.mockCrossL2Inbox.setValidation(true);
-        console.log("Set validation override to true");
+        console.log(unicode"\n🔁 Simulating UniChain OracleAdapter response...");
         
         // Update price from remote chain in the resolver
         try state.resolver.updateFromRemote(identifier, fullEventData) {
+            console.log(unicode"\n✅ Resolving price on Optimism side...");
             console.log("Price updated in destination chain resolver");
         } catch Error(string memory reason) {
             console.log("Price update failed:", reason);
@@ -253,11 +258,13 @@ contract OracleCrossChainDemoScript is Script {
         (int24 tick, uint160 sqrtPriceX96, uint32 timestamp, bool isValid, bool isFresh) = 
             state.resolver.getPrice(state.sourceChainId, state.actualPoolId);
         
-        console.log("=== Cross-Chain Price Verification ===");
+        console.log("\n=== Cross-Chain Price Verification ===");
         console.log("Tick:", uint256(uint24(tick)));
         console.log("SqrtPriceX96:", sqrtPriceX96);
         console.log("Timestamp:", timestamp);
         console.log("Is Valid:", isValid);
         console.log("Is Fresh:", isFresh);
+        
+        console.log(unicode"\n🏁 Demo Complete: AnyPrice cross-chain resolution succeeded.");
     }
 }

@@ -146,6 +146,54 @@ AnyPrice makes cross-chain price feeds composable, modular, and dev-friendly.
 * No more brittle relayer scripts.
 * Just plug in and price.
 
+## 🔒 Security Overview
+
+The AnyPrice Oracle system incorporates several security measures to ensure reliable and tamper-resistant cross-chain price data:
+
+### Cross-Chain Message Security
+
+- **Optimism CrossL2Inbox Validation**: Uses Optimism's native cross-chain message verification to validate all cross-chain events.
+- **Chain ID Validation**: Ensures messages originate from the expected source chain.
+- **Source Address Validation**: Verifies messages come from registered and authorized oracles.
+
+### Data Integrity Protections
+
+- **Replay Attack Prevention**: Implements multiple levels of replay protection:
+  - Unique event ID tracking using `keccak256(chainId, origin, logIndex, blockNumber)`
+  - Block number monotonicity enforcement
+  - Transaction-specific validation
+- **Finality Requirements**: Enforces minimum block confirmations before accepting cross-chain data to prevent reorganization attacks.
+- **Stale Data Prevention**: Rejects price data that exceeds configurable freshness thresholds.
+- **Timestamp Validation**: Checks for future timestamps and anomalous timestamp patterns.
+
+### Access Controls
+
+- **Source Registry**: Only accepts price updates from explicitly registered oracle adapters.
+- **Admin Functions**: Owner-only functions for managing sources, thresholds, and other sensitive parameters.
+- **Circuit Breaker**: Includes a pausable mechanism to halt price updates during emergencies.
+
+### Implementation Safeguards
+
+- **Reentrancy Protection**: Uses OpenZeppelin's `ReentrancyGuard` to prevent reentrancy attacks.
+- **Strict Data Validation**: Enforces extensive validation on all cross-chain messages.
+- **Chain-Specific Time Buffers**: Accounts for differences in block times across chains.
+- **Timeliness Checks**: Ensures that prices are current and representative.
+
+### Security Best Practices
+
+- **Immutable Core Components**: Critical components like chain IDs and oracle references are immutable.
+- **Defensive Programming**: Uses custom error types and robust error handling.
+- **Comprehensive Event Emission**: Extensive event logging for off-chain monitoring and forensics.
+- **Incremental Updates**: Smart freshness checks that only accept newer data than what's already stored.
+
+### Known Limitations
+
+- **Cross-Chain Messaging Dependency**: Relies on the security of the underlying cross-chain messaging protocol.
+- **Oracle Data Quality**: Depends on the accuracy of the source oracle implementations.
+- **Block Timestamp Reliance**: Some security features depend on block timestamps, which can be slightly manipulated by validators.
+
+For security disclosures or concerns, please contact the project maintainer directly.
+
 ## 👨‍💻 Author
 
 Built for the Unichain x Optimism Hackathon  
