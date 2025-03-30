@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BSL-1.1
 pragma solidity ^0.8.26;
 
 import "./CrossChainMessenger.sol";
@@ -41,9 +41,6 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     // Enhanced replay protection with last processed block number tracking
     mapping(uint256 => mapping(address => uint256)) public lastProcessedBlockNumber;
     
-    // Track abnormal timestamps
-    mapping(uint256 => mapping(bytes32 => bool)) public hasAbnormalTimestamp;
-    
     // Finality constants
     uint256 public constant FINALITY_BLOCKS = 50; // Number of blocks for finality
     
@@ -59,7 +56,6 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     event SourceRegistered(uint256 indexed sourceChainId, address indexed sourceAdapter);
     event SourceRemoved(uint256 indexed sourceChainId, address indexed sourceAdapter);
     event ChainTimeBufferUpdated(uint256 indexed chainId, uint256 oldBuffer, uint256 newBuffer);
-    event AbnormalTimestamp(uint256 chainId, bytes32 poolId, uint32 dataTimestamp, uint256 blockTimestamp);
     event DebugTimestampCheck(uint256 idTimestamp, uint256 blockTimestamp, uint32 dataTimestamp, uint256 effectiveThreshold);
     
     // Errors
@@ -337,32 +333,18 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         
         uint256 effectiveThreshold = freshnessThreshold + chainTimeBuffers[chainId];
         
-        // Three-stage freshness check with timestamp safety
-        bool freshCheck;
-        if (data.timestamp == 0) {
-            // Uninitialized timestamp
-            freshCheck = false;
-        } else if (data.timestamp >= block.timestamp || hasAbnormalTimestamp[chainId][poolId]) {
-            // Current time is before or equal to data timestamp
-            // OR this pool has been detected to have abnormal timestamps
-            // Consider as fresh to prevent DOS
-            freshCheck = true;
+        // Revised freshness check:
+        // 1. Data must be valid.
+        // 2. Timestamp cannot be zero.
+        // 3. Timestamp cannot be in the future (must be <= block.timestamp).
+        // 4. The difference between block timestamp and data timestamp must be within the effective threshold.
+        if (!data.isValid || data.timestamp == 0 || data.timestamp > block.timestamp) {
+            isFresh = false;
         } else {
-            // Normal case: timestamp is in the past
-            // Avoid underflow by ensuring data.timestamp is less than block.timestamp
-            freshCheck = (block.timestamp - data.timestamp) <= effectiveThreshold;
+            // Safe subtraction since data.timestamp <= block.timestamp
+            isFresh = (block.timestamp - data.timestamp) <= effectiveThreshold;
         }
         
-        return (data.tick, data.sqrtPriceX96, data.timestamp, true, freshCheck);
-    }
-    
-    /**
-     * @notice Checks if a pool has abnormal timestamps
-     * @param chainId The source chain ID
-     * @param poolId The pool identifier
-     * @return Whether the pool has abnormal timestamps
-     */
-    function checkAbnormalTimestamp(uint256 chainId, bytes32 poolId) external view returns (bool) {
-        return hasAbnormalTimestamp[chainId][poolId];
+        return (data.tick, data.sqrtPriceX96, data.timestamp, data.isValid, isFresh);
     }
 }

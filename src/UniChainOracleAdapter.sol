@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BSL-1.1
 pragma solidity ^0.8.26;
 
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
@@ -61,8 +61,16 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
                 revert OracleDataUnchanged(poolIdBytes, lastPublishedTimestamp[poolIdBytes]);
             }
             
+            // Clamp tick before calculating sqrtPriceX96 and emitting
+            int24 clampedTick = tick;
+            if (clampedTick < TickMath.MIN_TICK) {
+                clampedTick = TickMath.MIN_TICK;
+            } else if (clampedTick > TickMath.MAX_TICK) {
+                clampedTick = TickMath.MAX_TICK;
+            }
+            
             // Get sqrtPriceX96 from the tick
-            uint160 sqrtPriceX96 = _tickToSqrtPriceX96(tick);
+            uint160 sqrtPriceX96 = _tickToSqrtPriceX96(clampedTick);
             
             // Update the last published timestamp
             lastPublishedTimestamp[poolIdBytes] = timestamp;
@@ -72,7 +80,7 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
                 address(this),
                 sourceChainId,
                 poolIdBytes,
-                tick,
+                clampedTick,
                 sqrtPriceX96,
                 timestamp
             );
@@ -152,16 +160,7 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
      */
     function _tickToSqrtPriceX96(int24 tick) internal pure returns (uint160) {
         // Use Uniswap's TickMath library for accurate conversion
-        int24 clampedTick = tick;
-        
-        // Clamp to valid tick range
-        if (clampedTick < TickMath.MIN_TICK) {
-            clampedTick = TickMath.MIN_TICK;
-        } else if (clampedTick > TickMath.MAX_TICK) {
-            clampedTick = TickMath.MAX_TICK;
-        }
-        
         // Proper implementation based on Uniswap V4's TickMath
-        return TickMath.getSqrtPriceAtTick(clampedTick);
+        return TickMath.getSqrtPriceAtTick(tick);
     }
 }
