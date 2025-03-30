@@ -70,9 +70,9 @@ CrossChainPriceResolver acts as the main interface. It abstracts away messaging,
 
 ## 🎬 Demo Video
 
-Click the thumbnail below to watch a demonstration of AnyPrice in action:
+Watch a demonstration of AnyPrice in action:
 
-[![AnyPrice Demo](https://cdn.loom.com/sessions/thumbnails/f3150995f4524a42838ce76505df4978-with-play.gif)](https://www.loom.com/share/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1)
+<div style="position: relative; padding-bottom: 56.25%; height: 0;"><iframe src="https://www.loom.com/embed/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1" frameborder="0" webkitallowfullscreen mozallowfullscreen allowfullscreen style="position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></iframe></div>
 
 ## 🛠 Contracts Breakdown
 
