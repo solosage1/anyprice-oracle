@@ -18,6 +18,7 @@ import {TruncGeoOracleMulti} from "../src/TruncGeoOracleMulti.sol"; // Assuming 
  *      RPC_URL_B: RPC URL for Chain B
  *      CHAIN_ID_B: Chain ID for Chain B (passed to Sender on Chain A)
  *      TRUNC_ORACLE_MULTI_ADDRESS_A: Address of the deployed TruncGeoOracleMulti on Chain A
+ *      CHAIN_ID_A: Chain ID for Chain A (to register sender on receiver)
  */
 contract DeployL2L2Script is Script {
 
@@ -26,6 +27,7 @@ contract DeployL2L2Script is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         string memory rpcUrlA = vm.envString("RPC_URL_A");
         string memory rpcUrlB = vm.envString("RPC_URL_B");
+        uint256 chainIdA = vm.envUint("CHAIN_ID_A");
         uint256 chainIdB = vm.envUint("CHAIN_ID_B");
         address truncOracleAddressA = vm.envAddress("TRUNC_ORACLE_MULTI_ADDRESS_A");
 
@@ -45,7 +47,7 @@ contract DeployL2L2Script is Script {
 
         // --- Deploy Sender Adapter to Chain A ---
         console.log("Deploying PriceSenderAdapter to Chain A (%s)...", rpcUrlA);
-        uint256 forkA = vm.createSelectFork(rpcUrlA); // Create & select fork for Chain A
+        vm.selectFork(vm.createFork(rpcUrlA)); // Create & select fork for Chain A
         
         vm.startBroadcast(deployerPrivateKey);
         // Ensure TruncGeoOracleMulti exists at the specified address on Chain A
@@ -62,6 +64,16 @@ contract DeployL2L2Script is Script {
 
         adapterAddr = address(adapter);
         console.log("PriceSenderAdapter deployed to Chain A at:", adapterAddr);
+
+        // --- Register Sender Adapter on Resolver (Chain B) ---
+        console.log("Registering Sender Adapter (%s) on Resolver (%s) on Chain B...", vm.toString(adapterAddr), vm.toString(resolverAddr));
+        vm.selectFork(forkB); // Switch back to Chain B fork
+
+        vm.startBroadcast(deployerPrivateKey);
+        resolver.registerSource(chainIdA, adapterAddr);
+        vm.stopBroadcast();
+
+        console.log("Registration complete.");
 
         // Select initial fork again if needed for further scripting
         // vm.selectFork(forkA); // Or forkB

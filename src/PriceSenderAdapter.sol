@@ -7,14 +7,17 @@ import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {Predeploys} from "@eth-optimism/contracts-bedrock/src/libraries/Predeploys.sol";
 import {IL2ToL2CrossDomainMessenger} from "@eth-optimism/contracts-bedrock/interfaces/L2/IL2ToL2CrossDomainMessenger.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 
 /**
  * @title PriceSenderAdapter
  * @notice Adapter for sending oracle data from TruncGeoOracleMulti to other chains in the Superchain
- * @dev Uses L2ToL2CrossDomainMessenger for direct cross-chain communication
+ * @dev Uses L2ToL2CrossDomainMessenger for direct cross-chain communication. Access controlled.
  */
-contract PriceSenderAdapter is Ownable {
+contract PriceSenderAdapter is AccessControl {
+    // Role for accounts authorized to trigger routine price updates
+    bytes32 public constant KEEPER_ROLE = keccak256("KEEPER_ROLE");
+
     // The L2-to-L2 messenger for cross-chain communication
     IL2ToL2CrossDomainMessenger public immutable messenger;
 
@@ -46,22 +49,27 @@ contract PriceSenderAdapter is Ownable {
         uint256 _targetChainId,
         address _targetResolverAddress,
         IL2ToL2CrossDomainMessenger _messenger
-    ) Ownable(msg.sender) {
+    ) {
         if (address(_truncGeoOracle) == address(0) || _targetResolverAddress == address(0) || address(_messenger) == address(0)) 
             revert ZeroAddressNotAllowed();
         truncGeoOracle = _truncGeoOracle;
         targetChainId = _targetChainId;
         targetResolverAddress = _targetResolverAddress;
         messenger = _messenger;
+
+        // Grant admin and keeper roles to the deployer
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(KEEPER_ROLE, msg.sender);
     }
     
     /**
      * @notice Publishes oracle data for a specific pool to the target chain
      * @param key The pool key
-     * @dev Sends a cross-chain message via L2ToL2CrossDomainMessenger if new data is available
+     * @dev Sends a cross-chain message via L2ToL2CrossDomainMessenger if new data is available.
+     *      Requires KEEPER_ROLE.
      * @return success Boolean indicating if the message was sent
      */
-    function publishPoolData(PoolKey calldata key) external onlyOwner returns (bool success) {
+    function publishPoolData(PoolKey calldata key) external onlyRole(KEEPER_ROLE) returns (bool success) {
         PoolId pid = PoolIdLibrary.toId(key);
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
@@ -109,6 +117,8 @@ contract PriceSenderAdapter is Ownable {
      * @param tick The current tick
      * @param sqrtPriceX96 The square root price
      * @param timestamp The observation timestamp
+     * @dev Allows an admin to push arbitrary price data. Use with caution (e.g., for emergencies or seeding).
+     *      Requires DEFAULT_ADMIN_ROLE.
      * @return success Boolean indicating if the message was sent
      */
     function publishPriceData(
@@ -116,7 +126,7 @@ contract PriceSenderAdapter is Ownable {
         int24 tick,
         uint160 sqrtPriceX96,
         uint32 timestamp
-    ) external onlyOwner returns (bool success) {
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) returns (bool success) {
         // Timestamp validation
         if (timestamp > block.timestamp) revert FutureTimestamp();
         

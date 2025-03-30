@@ -14,6 +14,7 @@ import {MockTruncGeoOracleMulti} from "./mocks/MockTruncGeoOracleMulti.sol"; // 
 import {MockL2ToL2CrossDomainMessenger} from "./mocks/MockL2ToL2CrossDomainMessenger.sol"; // Need to create this mock
 import {IHooks} from "v4-core/src/interfaces/IHooks.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol"; // Import Ownable for the error
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol"; // Import for error selector
 import {IL2ToL2CrossDomainMessenger} from "@eth-optimism/contracts-bedrock/interfaces/L2/IL2ToL2CrossDomainMessenger.sol"; // Correct path with /L2/
 
 contract PriceSenderAdapterTest is Test {
@@ -26,6 +27,8 @@ contract PriceSenderAdapterTest is Test {
 
     address owner = address(0x1);
     address nonOwner = address(0x2);
+    address keeper = address(0x3);
+    address nonKeeper = address(0x4);
     address targetResolver = address(0xbeef);
     uint256 targetChainId = 902; // Example Chain B ID
 
@@ -60,6 +63,10 @@ contract PriceSenderAdapterTest is Test {
         // Default: Pool exists in oracle, no data initially
         mockOracle.setPoolExists(poolKey.toId(), true);
         mockOracle.setObservation(poolKey.toId(), 0, 0, 0, 0); 
+
+        // Grant KEEPER_ROLE
+        vm.prank(owner);
+        adapter.grantRole(adapter.KEEPER_ROLE(), keeper);
     }
 
     // --- Test Constructor ---
@@ -68,7 +75,7 @@ contract PriceSenderAdapterTest is Test {
         assertEq(address(adapter.truncGeoOracle()), address(mockOracle));
         assertEq(adapter.targetChainId(), targetChainId);
         assertEq(adapter.targetResolverAddress(), targetResolver);
-        assertEq(adapter.owner(), owner);
+        assertTrue(adapter.hasRole(adapter.DEFAULT_ADMIN_ROLE(), owner), "Owner should have DEFAULT_ADMIN_ROLE");
         assertEq(address(adapter.messenger()), address(mockMessenger));
     }
 
@@ -209,21 +216,60 @@ contract PriceSenderAdapterTest is Test {
         adapter.publishPoolData(poolKey);
     }
 
-    function test_publishPoolData_reverts_when_not_owner() public {
+    function test_publishPoolData_reverts_when_not_keeper() public {
         // Arrange: Setup oracle mock to return new data
         uint32 newTimestamp = uint32(block.timestamp);
         mockOracle.setObservation(PoolIdLibrary.toId(poolKey), newTimestamp, 1000, 0, 0);
 
-        // Act & Assert: Expect the custom error OwnableUnauthorizedAccount
+        // Act & Assert: Expect the custom error AccessControlUnauthorizedAccount
         vm.expectRevert(
-            abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, nonOwner)
+            abi.encodeWithSignature("AccessControlUnauthorizedAccount(address,bytes32)", nonKeeper, adapter.KEEPER_ROLE())
         );
-        vm.prank(nonOwner); // Use non-owner address
+        vm.prank(nonKeeper); // Use address without KEEPER_ROLE
         adapter.publishPoolData(poolKey);
     }
 
     // --- Test publishPriceData ---
-    // TODO: Add tests similar to publishPoolData but for the direct publishPriceData function
+
+    function test_publishPriceData_sendsMessage_byAdmin() public {
+        // Arrange: Data to send
+        uint32 newTimestamp = uint32(block.timestamp);
+        int24 newTick = 1500;
+        uint160 newSqrtPrice = TickMath.getSqrtPriceAtTick(newTick);
+
+        // Arrange: Calculate expected message
+        bytes memory expectedMessage = abi.encodeCall(
+            IPriceReceiverResolver.receivePriceUpdate,
+            (poolIdBytes, newTick, newSqrtPrice, newTimestamp)
+        );
+
+        // Act: Call as owner (who has DEFAULT_ADMIN_ROLE by default)
+        vm.prank(owner);
+        bool success = adapter.publishPriceData(poolIdBytes, newTick, newSqrtPrice, newTimestamp);
+        assertTrue(success);
+
+        // Assert: Check mock messenger state
+        assertEq(mockMessenger.sendMessageCallCount(), 1);
+        assertEq(mockMessenger.lastTargetChainId(), targetChainId);
+        assertEq(mockMessenger.lastTarget(), targetResolver);
+        assertEq(mockMessenger.lastMessage(), expectedMessage);
+        // Assert: Last published timestamp updated
+        assertEq(adapter.lastPublishedTimestamp(poolIdBytes), newTimestamp);
+    }
+
+    function test_publishPriceData_reverts_when_not_admin() public {
+        // Arrange: Data to send
+        uint32 newTimestamp = uint32(block.timestamp);
+        int24 newTick = 1500;
+        uint160 newSqrtPrice = TickMath.getSqrtPriceAtTick(newTick);
+
+        // Act & Assert: Expect revert when called by non-admin (e.g., keeper)
+        vm.expectRevert(
+            abi.encodeWithSignature("AccessControlUnauthorizedAccount(address,bytes32)", keeper, adapter.DEFAULT_ADMIN_ROLE())
+        );
+        vm.prank(keeper); // Has KEEPER_ROLE, but not DEFAULT_ADMIN_ROLE
+        adapter.publishPriceData(poolIdBytes, newTick, newSqrtPrice, newTimestamp);
+    }
 
     // --- Test getLatestPoolData ---
     // TODO: Add tests for the view function
