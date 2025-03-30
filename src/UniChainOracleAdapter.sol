@@ -49,6 +49,9 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
      * @dev Emits an OraclePriceUpdate event if new data is available
      */
     function publishPoolData(PoolKey calldata key) external {
+        // Only authorized callers
+        if (msg.sender != truncOracleIntegration) revert Unauthorized();
+
         PoolId pid = key.toId();
         bytes32 poolIdBytes = PoolId.unwrap(pid);
         
@@ -144,12 +147,13 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
         uint160 sqrtPriceX96
     ) {
         PoolId pid = key.toId();
-        
+        int24 originalTick; // Store original tick separately if needed later
+
         // Get latest observation from the oracle
-        (timestamp, tick, , ) = truncGeoOracle.getLastObservation(pid);
-        
+        (timestamp, originalTick, , ) = truncGeoOracle.getLastObservation(pid);
+
         // Clamp tick before calculating sqrtPriceX96 to prevent reverts in TickMath
-        int24 clampedTick = tick;
+        int24 clampedTick = originalTick;
         if (clampedTick < TickMath.MIN_TICK) {
             clampedTick = TickMath.MIN_TICK;
         } else if (clampedTick > TickMath.MAX_TICK) {
@@ -158,6 +162,9 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
 
         // Convert clamped tick to sqrtPriceX96
         sqrtPriceX96 = _tickToSqrtPriceX96(clampedTick);
+
+        // Return the clamped tick for consistency with sqrtPriceX96 calculation
+        tick = clampedTick;
     }
     
     /**

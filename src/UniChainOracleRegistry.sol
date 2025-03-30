@@ -76,25 +76,19 @@ contract UniChainOracleRegistry is Ownable {
     }
     
     /**
-     * @notice Updates an existing oracle adapter
+     * @notice Updates an existing oracle adapter's status
      * @param adapterId The adapter's unique identifier
      * @param chainId Chain ID where the adapter is deployed
-     * @param adapterAddress New address (if changed, otherwise use existing)
      * @param isActive Whether the adapter is active
      */
     function updateAdapter(
         bytes32 adapterId,
         uint256 chainId,
-        address adapterAddress,
         bool isActive
     ) external onlyOwner {
         require(oracleAdapters[chainId][adapterId].adapterAddress != address(0), "Adapter does not exist");
         
         OracleAdapter storage adapter = oracleAdapters[chainId][adapterId];
-        
-        if (adapterAddress != address(0)) {
-            adapter.adapterAddress = adapterAddress;
-        }
         
         adapter.isActive = isActive;
         

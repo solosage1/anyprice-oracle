@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSL-1.1
-pragma solidity =0.8.26;
+pragma solidity ^0.8.26;
 
 import {IPoolManager} from "v4-core/src/interfaces/IPoolManager.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
@@ -9,6 +9,7 @@ import {TruncatedOracle} from "./libraries/TruncatedOracle.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {StateLibrary} from "v4-core/src/libraries/StateLibrary.sol";
 import {Errors} from "./errors/Errors.sol";
+import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 
 /**
  * @title TruncGeoOracleMulti
@@ -38,9 +39,6 @@ contract TruncGeoOracleMulti {
     
     // The authorized FullRange hook address - critical for secure mutual authentication
     address public immutable fullRangeHook;
-
-    // Number of historic observations to keep (roughly 24h at 1h sample rate)
-    uint32 internal constant SAMPLE_CAPACITY = 24;
 
     struct ObservationState {
         uint16 index;
@@ -107,7 +105,7 @@ contract TruncGeoOracleMulti {
         }
         
         // Allow both the dynamic fee (0x800000 == 8388608) and fee == 0 pools
-        if (key.fee != 0 && key.fee != 8388608)
+        if (key.fee != 0 && key.fee != LPFeeLibrary.DYNAMIC_FEE_FLAG)
             revert Errors.OnlyDynamicFeePoolAllowed();
         
         maxAbsTickMove[id] = initialMaxAbsTickMove;
@@ -139,9 +137,6 @@ contract TruncGeoOracleMulti {
         PoolId pid = key.toId();
         bytes32 id = PoolId.unwrap(pid);
         
-        // Double check pool exists in PoolManager
-        uint128 liquidity = StateLibrary.getLiquidity(poolManager, pid);
-        
         // Check if pool is enabled in oracle
         if (states[id].cardinality == 0) {
             revert Errors.OracleOperationFailed("updateObservation", "Pool not enabled in oracle");
@@ -159,7 +154,7 @@ contract TruncGeoOracleMulti {
             states[id].index,
             _blockTimestamp(),
             tick,
-            liquidity,
+            0, // Passing 0 for liquidity
             states[id].cardinality,
             states[id].cardinalityNext,
             localMaxAbsTickMove
@@ -350,12 +345,19 @@ contract TruncGeoOracleMulti {
     }
 
     /**
-     * @notice MOCK FUNCTION FOR DEMO ONLY: Initializes a mock pool for demo purposes
+     * @notice MOCK FUNCTION FOR DEMO/TESTING ONLY: Initializes a mock pool for demo purposes
      * @param poolId The pool ID to initialize
      * @param initialTick The initial tick value to set
-     * @dev This function is only for demo purposes and should not be used in production
+     * @dev This function is only for demo/testing purposes and will revert in production environments
      */
     function mockInitializePool(bytes32 poolId, int24 initialTick) external {
+        // Only allow this function to be called in non-mainnet environments
+        // chainid: 1 = mainnet, 10 = optimism mainnet, 42161 = arbitrum mainnet
+        require(
+            block.chainid != 1 && block.chainid != 10 && block.chainid != 42161,
+            "Mock functions not available in production"
+        );
+        
         // Initialize the pool with mock data
         maxAbsTickMove[poolId] = 100; // Mock max tick move
         (states[poolId].cardinality, states[poolId].cardinalityNext) = observations[poolId].initialize(_blockTimestamp(), initialTick);

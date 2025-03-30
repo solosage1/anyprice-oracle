@@ -64,6 +64,11 @@ contract MockL2Inbox is Ownable, ICrossL2Inbox {
             revert InvalidIdentifier();
         }
         
+        // Messages from the same chain should not be processed via L2Inbox
+        if (_id.chainId == block.chainid) {
+            revert SameChainMessages();
+        }
+        
         // Debug info
         bool isFromFuture = _id.timestamp > block.timestamp;
         

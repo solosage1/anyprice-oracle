@@ -184,26 +184,10 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
                 emit AlertCleared(poolIdBytes);
             }
         } catch Error(string memory reason) {
-            state.consecutiveFailures++;
-            state.lastUpdateTimestamp = uint32(block.timestamp);
-            
-            // Only emit alert once until it's cleared
-            if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
-                state.hasActiveAlert = true;
-                emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
-            }
-            
+            _handlePublishFailure(poolIdBytes, reason);
             revert OracleUpdateFailed(poolIdBytes, reason);
         } catch (bytes memory) {
-            state.consecutiveFailures++;
-            state.lastUpdateTimestamp = uint32(block.timestamp);
-            
-            // Only emit alert once until it's cleared
-            if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
-                state.hasActiveAlert = true;
-                emit OracleUpdateAlert(poolIdBytes, "unknown error", state.consecutiveFailures);
-            }
-            
+            _handlePublishFailure(poolIdBytes, "unknown error");
             revert OracleUpdateFailed(poolIdBytes, "unknown error");
         }
     }
@@ -244,24 +228,29 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
                     emit AlertCleared(poolIdBytes);
                 }
             } catch Error(string memory reason) {
-                state.consecutiveFailures++;
-                state.lastUpdateTimestamp = uint32(block.timestamp);
-                
-                // Only emit alert once until it's cleared
-                if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
-                    state.hasActiveAlert = true;
-                    emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
-                }
+                _handlePublishFailure(poolIdBytes, reason);
+                // Note: We do not revert here to prevent breaking the hook callback chain
             } catch (bytes memory) {
-                state.consecutiveFailures++;
-                state.lastUpdateTimestamp = uint32(block.timestamp);
-                
-                // Only emit alert once until it's cleared
-                if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
-                    state.hasActiveAlert = true;
-                    emit OracleUpdateAlert(poolIdBytes, "unknown error", state.consecutiveFailures);
-                }
+                _handlePublishFailure(poolIdBytes, "unknown error");
+                // Note: We do not revert here to prevent breaking the hook callback chain
             }
+        }
+    }
+    
+    /**
+     * @notice Internal helper function to handle oracle update failures
+     * @param poolIdBytes The ID of the pool that failed
+     * @param reason The reason for the failure
+     */
+    function _handlePublishFailure(bytes32 poolIdBytes, string memory reason) internal {
+        PoolState storage state = poolStates[poolIdBytes];
+        state.consecutiveFailures++;
+        state.lastUpdateTimestamp = uint32(block.timestamp);
+        
+        // Only emit alert once until it's cleared
+        if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
+            state.hasActiveAlert = true;
+            emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
         }
     }
     

@@ -94,7 +94,19 @@ Watch a demonstration of AnyPrice in action:
 * Local forks or testnets for Optimism + UniChain
 * Set up .env with RPC URLs + private key
 
-### 1. Deploy Everything
+### Running the Demo
+
+The easiest way to run the demo is using the provided shell script:
+
+```bash
+./script/demo-run.sh
+```
+
+This script will set up the necessary environment and run the demo end-to-end.
+
+### Manual Deployment
+
+If you prefer to deploy manually:
 
 ```bash
 forge script script/OracleCrossChainDemo.s.sol \
