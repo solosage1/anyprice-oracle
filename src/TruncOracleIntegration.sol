@@ -80,7 +80,7 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         }
         
         // Additional validation for zero addresses
-        if (_truncGeoOracle == TruncGeoOracleMulti(address(0))) revert ZeroAddressNotAllowed("truncGeoOracle");
+        if (address(_truncGeoOracle) == address(0)) revert ZeroAddressNotAllowed("truncGeoOracle");
         if (_fullRangeHook == address(0)) revert ZeroAddressNotAllowed("fullRangeHook");
         
         // Add the hook to authorized callers

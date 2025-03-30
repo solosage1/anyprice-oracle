@@ -5,6 +5,7 @@ import "./CrossChainMessenger.sol";
 import "./interfaces/ICrossL2Inbox.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title CrossChainPriceResolver
@@ -78,7 +79,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
      */
     constructor(address _crossL2Inbox) Ownable(msg.sender) {
         if (_crossL2Inbox == address(0)) revert InvalidCrossL2InboxAddress();
-        crossL2Inbox = ICrossL2Inbox(_crossL2Inbox == address(0) ? CROSS_L2_INBOX : _crossL2Inbox);
+        crossL2Inbox = ICrossL2Inbox(_crossL2Inbox);
     }
     
     /**

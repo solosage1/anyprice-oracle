@@ -148,8 +148,16 @@ contract UniChainOracleAdapter is IOptimismBridgeAdapter {
         // Get latest observation from the oracle
         (timestamp, tick, , ) = truncGeoOracle.getLastObservation(pid);
         
-        // Convert tick to sqrtPriceX96
-        sqrtPriceX96 = _tickToSqrtPriceX96(tick);
+        // Clamp tick before calculating sqrtPriceX96 to prevent reverts in TickMath
+        int24 clampedTick = tick;
+        if (clampedTick < TickMath.MIN_TICK) {
+            clampedTick = TickMath.MIN_TICK;
+        } else if (clampedTick > TickMath.MAX_TICK) {
+            clampedTick = TickMath.MAX_TICK;
+        }
+
+        // Convert clamped tick to sqrtPriceX96
+        sqrtPriceX96 = _tickToSqrtPriceX96(clampedTick);
     }
     
     /**

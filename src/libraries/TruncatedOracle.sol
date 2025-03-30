@@ -65,6 +65,9 @@ library TruncatedOracle {
                 tick = tick > last.prevTick 
                     ? last.prevTick + maxAbsTickMove 
                     : last.prevTick - maxAbsTickMove;
+                
+                // Re-clamp the tick after applying maxAbsTickMove to ensure it stays within global bounds
+                tick = MathUtils.clampTick(tick);
             }
 
             return Observation({
@@ -289,7 +292,8 @@ library TruncatedOracle {
         uint16 cardinality,
         int24 maxAbsTickMove
     ) internal view returns (int48[] memory tickCumulatives, uint144[] memory secondsPerLiquidityCumulativeX128s) {
-        require(cardinality > 0, 'I');
+        // Use custom error for better clarity
+        if (cardinality == 0) revert OracleCardinalityCannotBeZero();
 
         tickCumulatives = new int48[](secondsAgos.length);
         secondsPerLiquidityCumulativeX128s = new uint144[](secondsAgos.length);
