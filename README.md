@@ -91,150 +91,24 @@ Watch a demonstration of AnyPrice in action:
 
 [Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f2402602fc534d9eafdf477428d8d53b?sid=0282eb3b-5422-4167-9516-a8375963c187)
 
-## 🧪 Running the Demo
+## �� Running the Demo
 
-### Prerequisites
-*   Foundry installed (`forge --version`)
-*   Node.js (v18+) & npm installed (`node --version`, `npm --version`)
-*   RPC endpoints for two OP Stack L2 chains (e.g., OP Sepolia and Base Sepolia).
-*   A deployer private key funded with test ETH on both chains.
-*   **IMPORTANT:** The `TruncGeoOracleMulti` contract **must be deployed beforehand** on the source chain (Chain A). This project **does not** currently include a deployment script for `TruncGeoOracleMulti` itself. You will need its deployed address. For testing, consider deploying a mock or a basic version if needed.
+Detailed instructions for setting up the environment, deploying the contracts, running the relay service, and interacting with the system can be found in the dedicated setup guide:
 
-### Environment Setup
+➡️ **[SETUP.md](./SETUP.md)** ⬅️
 
-1.  **Copy `.env.example` to `.env`**: 
-    ```bash
-    cp .env.example .env 
-    ```
-2.  **Fill `.env` variables** (replace placeholders with your actual values):
-    ```dotenv
-    # Your deployer private key (without 0x prefix)
-    PRIVATE_KEY=YOUR_PRIVATE_KEY_HERE 
-    
-    # RPC URL for Chain A (Source - where SenderAdapter & Oracle are)
-    RPC_URL_A=YOUR_RPC_URL_FOR_CHAIN_A 
-    
-    # RPC URL for Chain B (Destination - where ReceiverResolver is)
-    RPC_URL_B=YOUR_RPC_URL_FOR_CHAIN_B
-    
-    # Chain ID number for Chain A (e.g., Base Sepolia is 84532)
-    CHAIN_ID_A=CHAIN_A_ID_NUMBER 
-    
-    # Chain ID number for Chain B (e.g., OP Sepolia is 11155420)
-    CHAIN_ID_B=CHAIN_B_ID_NUMBER 
-    
-    # Address of the PRE-DEPLOYED TruncGeoOracleMulti contract on Chain A
-    TRUNC_ORACLE_MULTI_ADDRESS_A=ADDRESS_OF_ORACLE_ON_CHAIN_A 
-    
-    # Optional: Etherscan API Keys for verification (if deploying to public testnets)
-    # ETHERSCAN_API_KEY_A=YOUR_ETHERSCAN_KEY_CHAIN_A 
-    # ETHERSCAN_API_KEY_B=YOUR_ETHERSCAN_KEY_CHAIN_B 
-    ```
+Following that guide will walk you through:
+1.  Setting up your environment variables (`.env`).
+2.  Deploying the `PriceSenderAdapter` and `PriceReceiverResolver` contracts.
+3.  Running the necessary message relaying service.
+4.  Manually triggering price updates and reading them on the destination chain using `cast`.
 
-### Deployment
-
-This script deploys `PriceReceiverResolver` to Chain B and `PriceSenderAdapter` to Chain A, linking them.
-
-```bash
-# Load environment variables from .env
-source .env 
-
-# Ensure CHAIN_ID_A is set
-if [ -z "$CHAIN_ID_A" ]; then echo "Error: CHAIN_ID_A is not set in .env"; exit 1; fi
-
-# Run deployment script (targets Chain A initially, switches RPC internally)
-forge script script/DeployL2L2.s.sol --broadcast --rpc-url $RPC_URL_A 
-
-# Add --verify if deploying to Etherscan-supported testnets & keys are set in .env
-# forge script script/DeployL2L2.s.sol --broadcast --rpc-url $RPC_URL_A --verify
-```
-**Take note of the deployed `PriceSenderAdapter` (Chain A) and `PriceReceiverResolver` (Chain B) addresses printed by the script.**
-
-### Relaying Messages
-
-Optimism's L2-to-L2 messages need relaying. Choose one method:
-
-1.  **Autorelay (Local Devnet Only):** If using a local OP Stack devnet like `op-stack-devnet` or `supersim`, run it with the autorelay flag (`--interop.autorelay`). Messages relay automatically.
-2.  **Manual Relay Service (Testnet/Production):** Run the provided example relay service.
-    *   Navigate to the service directory: 
-        ```bash
-        cd script/price-relay-service
-        ```
-    *   Install dependencies:
-        ```bash
-        npm install
-        ```
-    *   Create a `.env` file in *this directory* (`script/price-relay-service/.env`), copying relevant values from the root `.env` and adding the deployed contract addresses:
-        ```dotenv
-        # Copied from root .env
-        PRIVATE_KEY=YOUR_PRIVATE_KEY_HERE 
-        RPC_URL_A=YOUR_RPC_URL_FOR_CHAIN_A 
-        RPC_URL_B=YOUR_RPC_URL_FOR_CHAIN_B
-        
-        # Deployed contract addresses from previous step
-        PRICE_SENDER_ADAPTER_ADDRESS_A=DEPLOYED_SENDER_ADDRESS_ON_CHAIN_A
-        PRICE_RECEIVER_RESOLVER_ADDRESS_B=DEPLOYED_RECEIVER_ADDRESS_ON_CHAIN_B
-        
-        # viem chain names (e.g., optimismSepolia, baseSepolia) - Find appropriate names in viem docs
-        CHAIN_NAME_A=baseSepolia # Example
-        CHAIN_NAME_B=optimismSepolia # Example 
-        ```
-    *   Start the relay service:
-        ```bash
-        npm start
-        ```
-    *   **Note:** The provided `index.ts` is a *basic polling example*. It periodically calls `publishPriceData` on the Sender (Chain A) and attempts to relay. Adapt the trigger logic (`shouldPublishAndRelay`) and relay mechanism (`sendAndRelayPrice`) for your specific needs or a production environment.
-
-### Triggering a Price Update Manually (Example)
-
-If not using the relay service's automatic trigger, you can manually push a price update from Chain A using `cast`:
-
-```bash
-# --- Set these variables ---
-# Pool ID (bytes32) from your TruncGeoOracleMulti setup
-POOL_ID=0xYOUR_POOL_ID_BYTES32 
-# Deployed PriceSenderAdapter address on Chain A
-SENDER_ADAPTER_ADDR=DEPLOYED_SENDER_ADDRESS_ON_CHAIN_A 
-# Owner's private key (from .env)
-OWNER_PK=$PRIVATE_KEY 
-# RPC URL for Chain A (from .env)
-RPC_A=$RPC_URL_A 
-# Example Price Data (replace with actual data from your oracle)
-TICK=12345 
-SQRT_PRICE=5678901234567890123456789012 
-TIMESTAMP=$(date +%s) # Current Unix timestamp
-
-# --- Send the transaction ---
-cast send --private-key $OWNER_PK --rpc-url $RPC_A \
-  $SENDER_ADAPTER_ADDR "publishPriceData(bytes32,int24,uint160,uint32)" \
-  $POOL_ID $TICK $SQRT_PRICE $TIMESTAMP
-```
-This calls `publishPriceData` on the `PriceSenderAdapter`. If a relay mechanism is active (auto or manual), the message should eventually be delivered to Chain B.
-
-### Reading the Price on Chain B
-
-Your dApp, or `cast`, can read the latest relayed price from the `PriceReceiverResolver` on Chain B:
-
-```bash
-# --- Set these variables ---
-# Deployed PriceReceiverResolver address on Chain B
-RESOLVER_ADDR=DEPLOYED_RECEIVER_ADDRESS_ON_CHAIN_B
-# RPC URL for Chain B (from .env)
-RPC_B=$RPC_URL_B 
-# Chain ID of the *source* chain (Chain A)
-SOURCE_CHAIN_ID_A=CHAIN_A_ID_NUMBER # e.g., Base Sepolia is 84532
-# Pool ID (bytes32) matching the one published
-POOL_ID=0xYOUR_POOL_ID_BYTES32 
-
-# --- Call getPrice ---
-# Function: getPrice(uint256 sourceChainId, bytes32 poolId) returns (PriceData memory)
-# PriceData struct: (int24 tick, uint160 sqrtPriceX96, uint32 timestamp, bool isValid)
-cast call --rpc-url $RPC_B $RESOLVER_ADDR \
-  "getPrice(uint256,bytes32)(int24,uint160,uint32,bool)" \
-  $SOURCE_CHAIN_ID_A $POOL_ID 
-```
-
-The result will be the `PriceData` struct fields: `(tick, sqrtPriceX96, timestamp, isValid)`. **Crucially, check the `isValid` flag (the last boolean value) before using the price data.** `isValid` is `true` only if a valid price has been received and stored for that `sourceChainId` and `poolId`.
+### Prerequisites Overview
+*   Foundry (`forge`)
+*   Node.js (`node`, `npm`)
+*   RPC endpoints for two OP Stack L2 testnets (e.g., OP Sepolia & Base Sepolia)
+*   A funded deployer wallet private key
+*   **Crucially:** An address for a deployed `TruncGeoOracleMulti` contract on the source chain (Chain A). See [SETUP.md](./SETUP.md) for details on handling this dependency during testing.
 
 ## 🛠 Contracts Breakdown
 
