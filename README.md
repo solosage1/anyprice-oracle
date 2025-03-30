@@ -61,20 +61,26 @@ Your dApp on Chain B can then simply call `PriceReceiverResolver.getPrice(source
 
 ```mermaid
 graph TD
-    subgraph Chain A
-        A[TruncGeoOracleMulti] --> B(PriceSenderAdapter);
-        B -- sendMessage --> C{{L2ToL2CrossDomainMessenger (Predeploy)}};
-    end
-    subgraph Chain B
-        D{{L2ToL2CrossDomainMessenger (Predeploy)}} -- Relayed Message --> E(PriceReceiverResolver);
-        F[Your dApp] -- getPrice --> E;
-    end
-    subgraph Off-Chain (Optional)
-        G{Relay Service} -- relayMessage --> D;
-        H{Trigger Service} -- Triggers --> B;
+    subgraph "Chain A"
+        A[TruncGeoOracleMulti] -->|Fetch Price| B[PriceSenderAdapter]
+        B -->|sendMessage| C[L2ToL2CrossDomainMessenger]
+        style C fill:#f9f,stroke:#333
     end
     
-    C -- Cross-Chain --> D;
+    subgraph "Chain B"
+        D[L2ToL2CrossDomainMessenger] -->|Relayed Message| E[PriceReceiverResolver]
+        F[Your dApp] -->|getPrice| E
+        style D fill:#f9f,stroke:#333
+    end
+    
+    subgraph "Off-Chain Services"
+        G[Relay Service] -->|relayMessage| D
+        H[Trigger Service] -->|Triggers| B
+    end
+    
+    C -->|Cross-Chain Message| D
+
+    classDef predeploy fill:#f9f,stroke:#333
 ```
 
 ## 🎬 Demo Video
