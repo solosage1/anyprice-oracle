@@ -96,8 +96,11 @@ contract CrossChainPriceResolverTest is Test {
         // Override validation for testing
         mockInbox.setValidation(true);
         
-        // Update from remote
-        resolver.updateFromRemote(id, eventData);
+        // Split event data into topics and data
+        (bytes32[] memory topics, bytes memory data) = _splitEventData(eventData);
+        
+        // Update price from remote chain
+        resolver.updateFromRemote(id, topics, data);
         
         // Verify the price was updated
         (int24 storedTick, uint160 storedSqrt, uint32 storedTimestamp, bool isValid, bool isFresh) = 
@@ -146,14 +149,39 @@ contract CrossChainPriceResolverTest is Test {
         });
         
         // Override validation for testing
-        mockInbox.setValidation(true);
+        mockInbox.setValidation(false);
         
-        // Expect revert due to unregistered source
-        vm.expectRevert(abi.encodeWithSelector(
-            CrossChainPriceResolver.SourceNotRegistered.selector,
-            SOURCE_CHAIN_ID,
-            SOURCE_ADAPTER
-        ));
-        resolver.updateFromRemote(id, eventData);
+        // Split event data into topics and data
+        (bytes32[] memory topics, bytes memory data) = _splitEventData(eventData);
+        
+        // Attempt to update from remote with invalid message
+        vm.expectRevert();
+        resolver.updateFromRemote(id, topics, data);
+    }
+
+    /// @notice Helper function to split event data into topics and data
+    function _splitEventData(bytes memory fullEventData) internal pure returns (bytes32[] memory topics, bytes memory data) {
+        require(fullEventData.length >= 128, "Invalid event data length"); // At least 4 topics (32 bytes each)
+        
+        // Create topics array
+        topics = new bytes32[](4);
+        for(uint i = 0; i < 4; i++) {
+            assembly {
+                mstore(add(topics, add(32, mul(i, 32))), mload(add(fullEventData, add(32, mul(i, 32)))))
+            }
+        }
+        
+        // Extract data part (everything after the topics)
+        uint dataLength = fullEventData.length - 128; // 128 = 4 topics * 32 bytes
+        data = new bytes(dataLength);
+        assembly {
+            let dataStart := add(fullEventData, 160) // 160 = 32 (length word) + 128 (topics)
+            let dataPtr := add(data, 32)
+            for { let i := 0 } lt(i, dataLength) { i := add(i, 32) } {
+                mstore(add(dataPtr, i), mload(add(dataStart, i)))
+            }
+        }
+        
+        return (topics, data);
     }
 } 

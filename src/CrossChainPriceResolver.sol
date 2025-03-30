@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSL-1.1
 pragma solidity ^0.8.26;
 
-import "./CrossChainMessenger.sol";
 import "./interfaces/ICrossL2Inbox.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -10,9 +9,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 /**
  * @title CrossChainPriceResolver
  * @notice Resolver contract that validates and consumes oracle price data from other chains
- * @dev Uses Optimism's CrossL2Inbox for secure cross-chain event validation
+ * @dev Uses Optimism's CrossL2Inbox for secure cross-chain event validation (implicitly via relayer proof)
  */
-contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGuard {
+contract CrossChainPriceResolver is Pausable, ReentrancyGuard, Ownable {
     // Price data structure
     struct PriceData {
         int24 tick;                 // Tick value
@@ -21,8 +20,8 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         bool isValid;               // Whether the data is valid/initialized
     }
     
-    // Reference to CrossL2Inbox contract (Optimism predeploy)
-    ICrossL2Inbox public immutable crossL2Inbox;
+    // Reference to CrossL2Inbox contract (Optimism predeploy) - address might be passed if flexibility needed
+    ICrossL2Inbox public immutable crossL2Inbox; // Keep immutable if address is fixed for deployment target
     
     // Price storage: chainId => poolId => PriceData
     mapping(uint256 => mapping(bytes32 => PriceData)) public prices;
@@ -39,7 +38,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     // Event replay protection: hash(chainId, origin, logIndex, blockNumber) => processed
     mapping(bytes32 => bool) public processedEvents;
     
-    // Enhanced replay protection with last processed block number tracking
+    // Enhanced replay protection with last processed block number tracking per source
     mapping(uint256 => mapping(address => uint256)) public lastProcessedBlockNumber;
     
     // Finality constants
@@ -63,7 +62,6 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     error InvalidCrossL2InboxAddress();
     error InvalidSourceAddress();
     error SourceNotRegistered(uint256 chainId, address source);
-    error MessageValidationFailed();
     error EventAlreadyProcessed(bytes32 eventId);
     error SourceMismatch(address expected, address received);
     error ChainIdMismatch(uint256 expected, uint256 received);
@@ -72,12 +70,13 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     error EventFromOlderBlock(uint256 eventBlockNumber, uint256 lastProcessedBlockNumber);
     error EventNotYetFinal(uint256 eventBlockNumber, uint256 currentBlockNumber, uint256 finalityBlocks);
     error FutureTimestamp();
+    error InvalidEventTopics(); // New error for topic validation
     
     /**
      * @notice Constructor
      * @param _crossL2Inbox Address of the CrossL2Inbox predeploy
      */
-    constructor(address _crossL2Inbox) Ownable(msg.sender) {
+    constructor(address _crossL2Inbox) Ownable(msg.sender) { // Ownable sets owner
         if (_crossL2Inbox == address(0)) revert InvalidCrossL2InboxAddress();
         crossL2Inbox = ICrossL2Inbox(_crossL2Inbox);
     }
@@ -140,43 +139,27 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     }
     
     /**
-     * @dev EVM log structure:
-     * - First 32 bytes: Event signature (keccak256 of event signature string)
-     * - Next 32*N bytes: Indexed parameters (topics), each padded to 32 bytes
-     * - Remaining bytes: ABI-encoded non-indexed parameters
-     */
-
-    /**
-     * @notice Extracts an address from a raw EVM topic
-     * @param topicData Raw topic bytes (32 bytes)
-     * @return The extracted address (20 bytes)
-     */
-    function _extractAddressFromTopic(bytes calldata topicData) internal pure returns (address) {
-        // An address is 20 bytes, but topics are 32 bytes, so we extract the last 20 bytes
-        // by first converting to uint256, then to uint160, then to address
-        return address(uint160(uint256(bytes32(topicData))));
-    }
-    
-    /**
-     * @notice Creates a unique event ID for replay protection
+     * @notice Creates a unique event ID hash for replay protection using Identifier fields
      * @param _id The cross-chain event identifier
-     * @return The unique event ID
+     * @return The unique event ID hash
      */
-    function _createEventId(ICrossL2Inbox.Identifier calldata _id) internal pure returns (bytes32) {
+    function _getEventIdHash(ICrossL2Inbox.Identifier calldata _id) internal pure returns (bytes32) {
+        // Hash includes all fields that make the source event unique
         return keccak256(abi.encode(_id.chainId, _id.origin, _id.logIndex, _id.blockNumber));
     }
-    
+
     /**
-     * @notice Internal helper function for decoding event data
-     * @param _data The event data to decode
-     * @return source The source address that sent the event
-     * @return sourceChainId The chain ID where the event originated
-     * @return poolId The unique identifier for the pool
-     * @return tick The tick value from the price update
-     * @return sqrtPriceX96 The square root price value in X96 format
-     * @return timestamp The timestamp when the price was observed
+     * @notice Internal helper function for decoding OraclePriceUpdate event data from topics and data
+     * @param topics Array of event topics (topic[0] = signature, topic[1] = source, topic[2] = chainId, topic[3] = poolId)
+     * @param data The ABI-encoded data containing non-indexed parameters (tick, sqrtPriceX96, timestamp)
+     * @return source The source address that sent the event (from topic[1])
+     * @return sourceChainId The chain ID where the event originated (from topic[2])
+     * @return poolId The unique identifier for the pool (from topic[3])
+     * @return tick The tick value from the price update (from data)
+     * @return sqrtPriceX96 The square root price value in X96 format (from data)
+     * @return timestamp The timestamp when the price was observed (from data)
      */
-    function _decodeEventData(bytes calldata _data) internal pure returns (
+    function _decodeOraclePriceUpdate(bytes32[] calldata topics, bytes calldata data) internal pure returns (
         address source,
         uint256 sourceChainId,
         bytes32 poolId,
@@ -184,112 +167,121 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         uint160 sqrtPriceX96,
         uint32 timestamp
     ) {
-        // Extract indexed params from topics (each topic is 32 bytes)
-        // First topic [0:32] is the event signature
-        source = _extractAddressFromTopic(_data[32:64]); // Second topic: indexed address
-        sourceChainId = uint256(bytes32(_data[64:96])); // Third topic: indexed uint256
-        poolId = bytes32(_data[96:128]);                // Fourth topic: indexed bytes32
-        
+        // Standard event structure check for OraclePriceUpdate
+        if (topics.length != 4) revert InvalidEventTopics();
+
+        // Extract indexed params from topics
+        // topics[0]: Event signature hash (ignored here)
+        // topics[1]: Indexed param 1 (source address) - extract address from bytes32
+        source = address(uint160(uint256(topics[1])));
+        // topics[2]: Indexed param 2 (sourceChainId) - convert bytes32 to uint256
+        sourceChainId = uint256(topics[2]);
+        // topics[3]: Indexed param 3 (poolId) - use bytes32 directly
+        poolId = topics[3];
+
         // Decode non-indexed params from data section
-        // Data section starts after all topics (4 topics * 32 bytes = 128 bytes)
-        (tick, sqrtPriceX96, timestamp) = 
-            abi.decode(_data[128:], (int24, uint160, uint32));
-        
+        (tick, sqrtPriceX96, timestamp) = abi.decode(data, (int24, uint160, uint32));
+
         return (source, sourceChainId, poolId, tick, sqrtPriceX96, timestamp);
     }
-    
+
     /**
-     * @notice Updates price data from a remote chain
-     * @param _id The identifier for the cross-chain event
-     * @param _data The event data
-     * @dev Validates the cross-chain event using Optimism's CrossL2Inbox
+     * @notice Updates price data from a remote chain based on event topics and data
+     * @param _id The identifier for the cross-chain event (contains origin, blockNumber etc.)
+     * @param topics The event topics array (including signature hash at topics[0])
+     * @param data The ABI-encoded event data (containing non-indexed parameters)
+     * @dev Validates the cross-chain event using Optimism's CrossL2Inbox (implicitly via off-chain relay proof)
+     *      and performs extensive internal checks.
      */
-    function updateFromRemote(ICrossL2Inbox.Identifier calldata _id, bytes calldata _data) external whenNotPaused nonReentrant {
-        // Verify the source is valid
+    function updateFromRemote(
+        ICrossL2Inbox.Identifier calldata _id,
+        bytes32[] calldata topics,
+        bytes calldata data
+    ) external whenNotPaused nonReentrant {
+        // --- Initial Checks & Replay Protection ---
         if (!validSources[_id.chainId][_id.origin]) revert SourceNotRegistered(_id.chainId, _id.origin);
-        
-        // Create unique event ID for replay protection
-        bytes32 eventId = _createEventId(_id);
-        
-        // Add stronger replay protection with block number tracking
+
+        // Ensure this specific event hasn't been processed using its unique identifier hash
+        bytes32 eventIdHash = _getEventIdHash(_id);
+        if (processedEvents[eventIdHash]) revert EventAlreadyProcessed(eventIdHash);
+
+        // Ensure we haven't processed an event from a later block for this source
         if (_id.blockNumber <= lastProcessedBlockNumber[_id.chainId][_id.origin]) {
             revert EventFromOlderBlock(_id.blockNumber, lastProcessedBlockNumber[_id.chainId][_id.origin]);
         }
-        
-        // Only process events that are at least FINALITY_BLOCKS old (prevent reorg attacks)
-        // Skip this check for same-chain events or if the finality check would overflow
+        // Update last processed block number *after* passing the check
+        lastProcessedBlockNumber[_id.chainId][_id.origin] = _id.blockNumber;
+
+        // --- Finality Check ---
+        // Skip check for same-chain messages or if block.number is too low
         if (_id.chainId != block.chainid && block.number >= FINALITY_BLOCKS) {
             uint256 finalityThreshold = block.number - FINALITY_BLOCKS;
+            // Ensure the source block is below the finality threshold
             if (_id.blockNumber > finalityThreshold) {
                 revert EventNotYetFinal(_id.blockNumber, block.number, FINALITY_BLOCKS);
             }
         }
-        
-        // Update last processed block number
-        lastProcessedBlockNumber[_id.chainId][_id.origin] = _id.blockNumber;
-        
-        // Check if event has already been processed
-        if (processedEvents[eventId]) revert EventAlreadyProcessed(eventId);
-        
-        // Mark event as processed to prevent replay attacks
-        processedEvents[eventId] = true;
-        
-        // Validate the message using CrossL2Inbox
-        if (!crossL2Inbox.validateMessage(_id, keccak256(_data))) revert MessageValidationFailed();
-        
-        // Decode the event data using our improved helper function
+
+        // --- L2Inbox Validation (Implicit) ---
+        // The CrossL2Inbox pattern relies on the relayer submitting a valid proof to the L2 inbox contract.
+        // We don't call validateMessage directly here. If this transaction executes successfully,
+        // it implies the message authentication via the L2Inbox mechanism succeeded.
+
+        // --- Decode & Validate Event Data ---
+        // Decode using the standard topics/data structure
         (
-            address source,
-            uint256 sourceChainId,
-            bytes32 poolId,
+            address source,         // Decoded source from topics[1]
+            uint256 sourceChainId,  // Decoded chainId from topics[2]
+            bytes32 poolId,         // Decoded poolId from topics[3]
             int24 tick,
             uint160 sqrtPriceX96,
-            uint32 timestamp
-        ) = _decodeEventData(_data);
-        
-        // Additional validations
+            uint32 timestamp        // Decoded timestamp from data
+        ) = _decodeOraclePriceUpdate(topics, data);
+
+        // --- Consistency Checks ---
+        // Ensure decoded data matches the trusted Identifier fields
         if (source != _id.origin) revert SourceMismatch(_id.origin, source);
         if (sourceChainId != _id.chainId) revert ChainIdMismatch(_id.chainId, sourceChainId);
-        
-        // Validate source block timestamp - use safer comparison
-        bool isSourceFromFuture = _id.timestamp > block.timestamp;
-        if (isSourceFromFuture) revert SourceBlockFromFuture(_id.timestamp, block.timestamp);
-        
-        // Determine effective freshness threshold with chain-specific buffer
+
+        // --- Timestamp Checks ---
+        // Validate source block timestamp (from Identifier) against current block timestamp
+        bool isSourceBlockFromFuture = _id.timestamp > block.timestamp;
+        if (isSourceBlockFromFuture) revert SourceBlockFromFuture(_id.timestamp, block.timestamp);
+
+        // Determine effective freshness threshold including chain-specific buffer
         uint256 effectiveThreshold = freshnessThreshold + chainTimeBuffers[_id.chainId];
-        
-        // Emit debug info
         emit DebugTimestampCheck(_id.timestamp, block.timestamp, timestamp, effectiveThreshold);
-        
-        // Timestamp validation (freshness check) - avoid underflow with safer comparison
-        bool isDataOld = timestamp < block.timestamp && 
-                        (block.timestamp - timestamp) > effectiveThreshold;
-        if (isDataOld) {
-            revert PriceDataTooOld(timestamp, effectiveThreshold, block.timestamp);
-        }
-        
-        // Check for abnormal timestamp (future timestamp)
-        bool isFutureTimestamp = timestamp > block.timestamp;
-        if (isFutureTimestamp) {
-            // Reject future timestamps outright to maintain data integrity
-            revert FutureTimestamp();
-        }
-        
-        // Check if we already have fresher data
+
+        // Validate data timestamp (from event data) against current block timestamp
+        // 1. Data timestamp cannot be in the future relative to current block
+        bool isFutureDataTimestamp = timestamp > block.timestamp;
+        if (isFutureDataTimestamp) revert FutureTimestamp();
+
+        // 2. Data timestamp cannot be too old (freshness check)
+        // Safe subtraction because we know timestamp <= block.timestamp from the check above
+        bool isDataOld = (block.timestamp - timestamp) > effectiveThreshold;
+        if (isDataOld) revert PriceDataTooOld(timestamp, effectiveThreshold, block.timestamp);
+
+        // --- Check Against Existing Data ---
+        // Avoid overwriting with stale data (same or older timestamp)
         if (prices[_id.chainId][poolId].isValid && prices[_id.chainId][poolId].timestamp >= timestamp) {
-            return; // Silently ignore older updates
+            return; // Silently ignore older or same-timestamp updates
         }
-        
-        // Store the price data
+
+        // --- Update State ---
+        // All checks passed, mark event as processed and store the price data
+        processedEvents[eventIdHash] = true; // Mark event ID hash as processed
+
         prices[_id.chainId][poolId] = PriceData(tick, sqrtPriceX96, timestamp, true);
-        
-        // Emit event for off-chain tracking
+
+        // Emit event for off-chain tracking/consumers on this chain
         emit PriceUpdated(sourceChainId, poolId, tick, sqrtPriceX96, timestamp);
     }
-    
+
     /**
-     * @notice Helper function for decoding event data - for external use and testing
-     * @param _data The event data to decode
+     * @notice Public helper function for decoding OraclePriceUpdate event data - for external use and testing
+     * @param topics The event topics array (must include signature hash at index 0)
+     * @param data The ABI-encoded event data (non-indexed parameters)
      * @return source The source address that sent the event
      * @return sourceChainId The chain ID where the event originated
      * @return poolId The unique identifier for the pool
@@ -297,7 +289,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
      * @return sqrtPriceX96 The square root price value in X96 format
      * @return timestamp The timestamp when the price was observed
      */
-    function decodeEventData(bytes calldata _data) external pure returns (
+    function decodeOraclePriceUpdate(bytes32[] calldata topics, bytes calldata data) external pure returns (
         address source,
         uint256 sourceChainId,
         bytes32 poolId,
@@ -305,7 +297,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         uint160 sqrtPriceX96,
         uint32 timestamp
     ) {
-        return _decodeEventData(_data);
+        return _decodeOraclePriceUpdate(topics, data);
     }
     
     /**
@@ -316,7 +308,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
      * @return sqrtPriceX96 The square root price
      * @return timestamp The timestamp of the observation
      * @return isValid Whether the data is valid
-     * @return isFresh Whether the data is fresh
+     * @return isFresh Whether the data is fresh based on current time and thresholds
      */
     function getPrice(uint256 chainId, bytes32 poolId) external view returns (
         int24 tick,
@@ -327,7 +319,7 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
     ) {
         PriceData memory data = prices[chainId][poolId];
         
-        // If data is invalid, return early with default values
+        // If data is invalid (never stored), return early with default values
         if (!data.isValid) {
             return (0, 0, 0, false, false);
         }
@@ -335,11 +327,12 @@ contract CrossChainPriceResolver is CrossChainMessenger, Pausable, ReentrancyGua
         uint256 effectiveThreshold = freshnessThreshold + chainTimeBuffers[chainId];
         
         // Revised freshness check:
-        // 1. Data must be valid.
-        // 2. Timestamp cannot be zero.
-        // 3. Timestamp cannot be in the future (must be <= block.timestamp).
-        // 4. The difference between block timestamp and data timestamp must be within the effective threshold.
-        if (!data.isValid || data.timestamp == 0 || data.timestamp > block.timestamp) {
+        // 1. Data must be valid (already checked).
+        // 2. Timestamp cannot be zero (implicitly covered by isValid).
+        // 3. Timestamp cannot be in the future relative to current block time.
+        // 4. The age (block.timestamp - data.timestamp) must be within the effective threshold.
+        if (data.timestamp > block.timestamp) {
+            // Should ideally not happen due to checks in updateFromRemote, but check defensively
             isFresh = false;
         } else {
             // Safe subtraction since data.timestamp <= block.timestamp

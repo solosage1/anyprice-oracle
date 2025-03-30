@@ -2,6 +2,7 @@
 pragma solidity ^0.8.26;
 
 import "./CrossChainPriceResolver.sol";
+import "./interfaces/ICrossL2Inbox.sol";
 
 /**
  * @title TestEventDecoding
@@ -10,17 +11,17 @@ import "./CrossChainPriceResolver.sol";
  */
 contract TestEventDecoding {
     /**
-     * @notice Tests event decoding with provided event data
-     * @param eventData Raw event data to decode
-     * @return source Extracted source address
-     * @return sourceChainId Extracted source chain ID
-     * @return poolId Extracted pool ID
-     * @return tick Extracted tick value
-     * @return sqrtPriceX96 Extracted sqrt price
-     * @return timestamp Extracted timestamp
+     * @notice Attempts to decode event data and returns the result with a success flag
+     * @param eventData The event data to decode
+     * @return source Source address
+     * @return sourceChainId Source chain ID
+     * @return poolId Pool identifier
+     * @return tick Tick value
+     * @return sqrtPriceX96 Square root price
+     * @return timestamp Observation timestamp
      * @return success Whether decoding succeeded
      */
-    function testEventDecoding(bytes calldata eventData) external pure returns (
+    function tryDecodeEventData(bytes memory eventData) external pure returns (
         address source,
         uint256 sourceChainId,
         bytes32 poolId,
@@ -29,23 +30,42 @@ contract TestEventDecoding {
         uint32 timestamp,
         bool success
     ) {
-        // Validate minimum event data length
         if (eventData.length < 128) {
             return (address(0), 0, bytes32(0), 0, 0, 0, false);
         }
         
-        try CrossChainPriceResolver(address(0)).decodeEventData(eventData) returns (
-            address _source,
-            uint256 _sourceChainId,
-            bytes32 _poolId,
-            int24 _tick,
-            uint160 _sqrtPriceX96,
-            uint32 _timestamp
-        ) {
-            return (_source, _sourceChainId, _poolId, _tick, _sqrtPriceX96, _timestamp, true);
-        } catch {
-            return (address(0), 0, bytes32(0), 0, 0, 0, false);
+        // Split event data into topics and data
+        bytes32[] memory topics = new bytes32[](4);
+        bytes memory data;
+        for(uint i = 0; i < 4; i++) {
+            assembly {
+                mstore(add(topics, add(32, mul(i, 32))), mload(add(eventData, add(32, mul(i, 32)))))
+            }
         }
+        
+        uint dataLength = eventData.length - 128;
+        data = new bytes(dataLength);
+        assembly {
+            let dataStart := add(eventData, 160)
+            let dataPtr := add(data, 32)
+            for { let i := 0 } lt(i, dataLength) { i := add(i, 32) } {
+                mstore(add(dataPtr, i), mload(add(dataStart, i)))
+            }
+        }
+        
+        // Extract indexed params from topics
+        // topics[0]: Event signature hash (ignored here)
+        // topics[1]: Indexed param 1 (source address) - extract address from bytes32
+        source = address(uint160(uint256(topics[1])));
+        // topics[2]: Indexed param 2 (sourceChainId) - convert bytes32 to uint256
+        sourceChainId = uint256(topics[2]);
+        // topics[3]: Indexed param 3 (poolId) - use bytes32 directly
+        poolId = topics[3];
+
+        // Decode non-indexed params from data section
+        (tick, sqrtPriceX96, timestamp) = abi.decode(data, (int24, uint160, uint32));
+        
+        return (source, sourceChainId, poolId, tick, sqrtPriceX96, timestamp, true);
     }
     
     /**

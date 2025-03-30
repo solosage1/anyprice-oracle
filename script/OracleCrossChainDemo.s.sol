@@ -240,7 +240,10 @@ contract OracleCrossChainDemoScript is Script {
         console.log(unicode"\n🔁 Simulating UniChain OracleAdapter response...");
         
         // Update price from remote chain in the resolver
-        try state.resolver.updateFromRemote(identifier, fullEventData) {
+        bytes32[] memory topics = new bytes32[](4);
+        bytes memory data;
+        (topics, data) = _splitEventData(fullEventData);
+        try state.resolver.updateFromRemote(identifier, topics, data) {
             console.log(unicode"\n✅ Resolving price on Optimism side...");
             console.log("Price updated in destination chain resolver");
         } catch Error(string memory reason) {
@@ -266,5 +269,31 @@ contract OracleCrossChainDemoScript is Script {
         console.log("Is Fresh:", isFresh);
         
         console.log(unicode"\n🏁 Demo Complete: AnyPrice cross-chain resolution succeeded.");
+    }
+
+    /// @notice Helper function to split event data into topics and data
+    function _splitEventData(bytes memory fullEventData) internal pure returns (bytes32[] memory topics, bytes memory data) {
+        require(fullEventData.length >= 128, "Invalid event data length"); // At least 4 topics (32 bytes each)
+        
+        // Create topics array
+        topics = new bytes32[](4);
+        for(uint i = 0; i < 4; i++) {
+            assembly {
+                mstore(add(topics, add(32, mul(i, 32))), mload(add(fullEventData, add(32, mul(i, 32)))))
+            }
+        }
+        
+        // Extract data part (everything after the topics)
+        uint dataLength = fullEventData.length - 128; // 128 = 4 topics * 32 bytes
+        data = new bytes(dataLength);
+        assembly {
+            let dataStart := add(fullEventData, 160) // 160 = 32 (length word) + 128 (topics)
+            let dataPtr := add(data, 32)
+            for { let i := 0 } lt(i, dataLength) { i := add(i, 32) } {
+                mstore(add(dataPtr, i), mload(add(dataStart, i)))
+            }
+        }
+        
+        return (topics, data);
     }
 }
