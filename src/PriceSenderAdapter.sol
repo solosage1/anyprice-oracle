@@ -119,6 +119,7 @@ contract PriceSenderAdapter is AccessControl {
      * @param timestamp The observation timestamp
      * @dev Allows an admin to push arbitrary price data. Use with caution (e.g., for emergencies or seeding).
      *      Requires DEFAULT_ADMIN_ROLE.
+     *      This bypasses the direct oracle fetch, allowing manual price injection.
      * @return success Boolean indicating if the message was sent
      */
     function publishPriceData(

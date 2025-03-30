@@ -25,9 +25,9 @@ sleep 5
 
 # [0:08 - 0:20] — Problem
 echo -e "\n${BOLD}${YELLOW}[SCENARIO: Chain B Needs Price from Chain A]${NC}"
-echo -e "⛓️  Your dApp is on ${BOLD}Chain B${NC} (e.g., OP Sepolia - Chain ID 11155420)"
+echo -e "⛓️  Your dApp is on ${BOLD}Chain B${NC} (e.g., Optimism)"
 sleep 4
-echo -e "📉 It needs the price of WETH/USDC, but the deepest liquidity is on ${BOLD}Chain A${NC} (e.g., Base Sepolia - Chain ID 84532)"
+echo -e "📉 It needs the price of WETH/USDC, but the deepest liquidity is on ${BOLD}Chain A${NC} (e.g., Unichain)"
 sleep 4
 echo -e "${RED}❌ PROBLEM: Standard oracles on Chain B don't have this fresh price.${NC}"
 echo -e "${YELLOW}✗ Old L2Inbox methods required complex off-chain relayers & proof systems.${NC}"
@@ -98,7 +98,7 @@ sleep 3
 
 # [1:05 - 1:15] — Result
 echo -e "\n${BOLD}${GREEN}[CHAIN B] === Reading Stored Price ===${NC}"
-echo -e "${CYAN}cast call --rpc-url \$RPC_URL_B 0xBEEF...1234 \"getPrice(uint256,bytes32)\" 84532 \$POOL_ID${NC}"
+echo -e "${CYAN}cast call --rpc-url \$RPC_URL_B 0xBEEF...1234 \"getPrice(uint256,bytes32)\" UNCHAIN_CHAIN_ID \$POOL_ID${NC}"
 sleep 2
 echo "Tick: 12345" # Example Data
 echo "SqrtPriceX96: 88765..."
