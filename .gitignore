@@ -43,6 +43,8 @@ broadcast/
 # Logs
 logs
 *.log
+deploy.txt
+oracle_deploy.txt
 
 # Build artifacts
 dist/
