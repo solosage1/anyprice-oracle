@@ -558,13 +558,13 @@ graph TD
         CXM["Canonical Bedrock CXM\nL1CrossDomainMessenger"]
         L2Messenger["L2CrossDomainMessenger"]
         
-        DataSrc -->|1. Data Payload| L1Adapter
-        L1Adapter -->|2. sendMessage| CXM
-        CXM -->|3. Relay to L2| L2Messenger
-        L2Messenger -->|4. Deliver| Provider
+        DataSrc -->|Data Payload| L1Adapter
+        L1Adapter -->|sendMessage Call| CXM
+        CXM -->|Relay Message to L2| L2Messenger
+        L2Messenger -->|Deliver Payload| Provider
     end
 
-    Provider -->|5. Return Data| App
+    Provider -->|Return Data to App| App
 
     classDef canonicalOpStack fill:#DFF0D8,stroke:#3C763D,color:#3C763D
     class CXM,L1Adapter,L2Messenger,DataSrc canonicalOpStack
