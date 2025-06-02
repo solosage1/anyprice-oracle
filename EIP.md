@@ -546,17 +546,17 @@ excessive gas overhead.
 graph TD
     subgraph L2_Logic[L2 Application Logic]
         direction LR
-        App[L2 User/App sends Query for Data]
-        Provider[ERC-76xx Provider on L2 Parses Freshness, etc.]
+        App["L2 User/App sends Query for Data"]
+        Provider["ERC-76xx Provider on L2\nParses Freshness, etc."]
         App --> Provider
     end
 
     subgraph Transport[ERC-76xx v1.0 Transport on OP-Stack Chains]
         direction TB
-        DataSrc[Data Source L1 Contract / Off-Chain Oracle]
-        L1Adapter[ERC-76xx L1 Adapter Contract]
-        CXM[Canonical Bedrock CXM L1CrossDomainMessenger]
-        L2Messenger[L2CrossDomainMessenger]
+        DataSrc["Data Source\nL1 Contract / Off-Chain Oracle"]
+        L1Adapter["ERC-76xx L1 Adapter Contract"]
+        CXM["Canonical Bedrock CXM\nL1CrossDomainMessenger"]
+        L2Messenger["L2CrossDomainMessenger"]
         
         DataSrc -->|1. Data Payload| L1Adapter
         L1Adapter -->|2. sendMessage| CXM
@@ -571,7 +571,7 @@ graph TD
 
     subgraph Note[Note on Alternative Paths]
         direction LR
-        PotentialFuture[Alternative transport mechanisms are out of scope for v1.0 on OP-Stack. May be defined in future extensions.]
+        PotentialFuture["Alternative transport mechanisms are out of scope for v1.0 on OP-Stack.\nMay be defined in future extensions."]
     end
     style PotentialFuture fill:#F9F9F9,stroke:#CCC,color:#555,stroke-dasharray: 5 5
 ```
