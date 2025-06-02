@@ -546,27 +546,32 @@ excessive gas overhead.
 graph TD
     subgraph L2_Logic[L2 Application Logic]
         direction LR
-        App["L2 User/App<br>sends Query for Data"]
-        Provider["ERC-76xx Provider on L2<br>Parses Freshness, etc."]
+        App[L2 User/App sends Query for Data]
+        Provider[ERC-76xx Provider on L2 Parses Freshness, etc.]
         App --> Provider
     end
 
     subgraph Transport[ERC-76xx v1.0 Transport on OP-Stack Chains]
         direction TB
-        DataSrc["Data Source<br>L1 Contract / Off-Chain Oracle"] -- "1. Data Payload with Freshness" --> L1Adapter["ERC-76xx L1 Adapter Contract"]
-        L1Adapter -- "2. Calls sendMessage with<br>ERC-76xx Payload" --> CXM["Canonical Bedrock CXM<br>L1CrossDomainMessenger"]
-        CXM -- "3. Relays Message to L2" --> L2Messenger["L2CrossDomainMessenger"]
-        L2Messenger -- "4. Delivers ERC-76xx Payload" --> Provider
+        DataSrc[Data Source L1 Contract / Off-Chain Oracle]
+        L1Adapter[ERC-76xx L1 Adapter Contract]
+        CXM[Canonical Bedrock CXM L1CrossDomainMessenger]
+        L2Messenger[L2CrossDomainMessenger]
+        
+        DataSrc -->|1. Data Payload| L1Adapter
+        L1Adapter -->|2. sendMessage| CXM
+        CXM -->|3. Relay to L2| L2Messenger
+        L2Messenger -->|4. Deliver| Provider
     end
 
-    Provider -- "5. Provides Verified Fresh Data" --> App
+    Provider -->|5. Return Data| App
 
     classDef canonicalOpStack fill:#DFF0D8,stroke:#3C763D,color:#3C763D
     class CXM,L1Adapter,L2Messenger,DataSrc canonicalOpStack
 
     subgraph Note[Note on Alternative Paths]
         direction LR
-        PotentialFuture["Alternative transport mechanisms<br>are out of scope for v1.0 on OP-Stack.<br>May be defined in future extensions."]
+        PotentialFuture[Alternative transport mechanisms are out of scope for v1.0 on OP-Stack. May be defined in future extensions.]
     end
     style PotentialFuture fill:#F9F9F9,stroke:#CCC,color:#555,stroke-dasharray: 5 5
 ```
