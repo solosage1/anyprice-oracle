@@ -33,7 +33,7 @@ github.com
 . However, EIP-2362 assumes a
 single-chain context – it does not account for cross-chain sources or the latency of obtaining data
 from L1 versus L2. More recently, ERC-7726 ("Common Quote Oracle") standardized an API for asset price
-feeds: it introduces getQuote(baseAmount, base, quote) which returns how much of quote asset equals
+feeds (e.g., in draft-04 of the EIP): it introduces `quote(uint256 baseAmount, address base, address quote)` which returns how much of quote asset equals
 a given baseAmount of base asset
 eips.ethereum.org
 eips.ethereum.org
@@ -94,7 +94,7 @@ qualitax.gitbook.io
 . This improves reuse
 of cross-chain code and abstracts over different security/speed trade-offs. However, EIP-5164 treats all
 messages uniformly; it doesn't have a notion of message expiry or data freshness. A related standard,
-EIP-7092 (Financial Bonds), even includes an optional cross-chain module for bond tokens, allowing a
+EIP-7092 (Financial Bonds), even includes an optional (and currently draft) cross-chain module for bond tokens, allowing a
 bond contract to specify a destination chain and contract when transferring tokens across chains
 eips.ethereum.org
 eips.ethereum.org
@@ -120,8 +120,7 @@ specs.optimism.io
 standardized the messaging format (introducing a versioned nonce and support for sending ETH value with
 the message)
 specs.optimism.io
-. A crucial detail is latency: L1→L2 messages are relayed within ~1–3
-minutes, whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
+. A crucial detail is latency: L1→L2 messages are relayed typically on the order of a few minutes (30 s to 15 m in practice), whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
 docs.optimism.io
 docs.optimism.io
 .
@@ -132,7 +131,7 @@ using trusted relayers to forward data faster, both of which introduce new trust
 ### Beacon Chain Root as Oracle (EIP-4788)
 
 An emerging piece of the interoperability puzzle is EIP-4788,
-which will expose the Ethereum beacon chain's state root inside the EVM
+which will expose the Ethereum beacon chain's state root (specifically, the previous beacon-block root, typically one epoch or ≈ 4–12 min old) inside the EVM
 consensys.io
 . In essence,
 EIP-4788 is an enshrined oracle for Ethereum's consensus state
@@ -372,9 +371,7 @@ likelihood, and NICE-TO-HAVE items provide future flexibility without bogging do
 ## Key Differentiators of ERC-76xx
 
 Solo Labs can highlight the following unique selling points of ERC-76xx in public communications:
-* 🚀 **Real-Time Cross-Chain Data:** ERC-76xx is the first Ethereum standard laser-focused on delivering
-  fresh data across chains in (near) real-time. It ensures that rollups can react to off-chain events
-  without waiting days or trusting centralized oracles.
+* 🚀 **Real-Time Cross-Chain Data:** ERC-76xx is the first oracle-specific Ethereum standard that bakes time-to-freshness directly into the payload.
 * 🔗 **Built for Rollup Interoperability:** Designed with Optimism's Bedrock and similar L2s in mind,
   ERC-76xx seamlessly plugs into the OP Stack "Superchain" model. It complements the canonical messenger
   by adding data validity windows and optional faster paths, solving pain points specific to optimistic
@@ -479,13 +476,11 @@ allowed freshness.
 
 ### Calldata Size
 
-The size of a single data update message is quite small – in the above example:
-id is 32 bytes,
-value (an int256) 32 bytes,
-timestamp 8 bytes (if using uint64, which is enough for Unix time for ~10^11 years),
-plus overhead for encoding (function selector 4 bytes, some offset words). In total, roughly ~100 bytes
-of calldata. On L1, calldata costs 16 gas/byte (for non-zero bytes) or 4 gas/byte for zeros. So 100 bytes
-might cost on the order of 1,600 gas (if mostly nonzero). This is negligible compared to the base cost
+The size of a single data update message is quite small. In the example `(bytes32 id, int256 value, uint64 timestamp)`:
+`id` is 32 bytes,
+`value` (an int256) is 32 bytes,
+`timestamp` conceptually 8 bytes (if using uint64). However, in standard ABI encoding (e.g., for function calls like `receiveUpdate(bytes32, int256, uint64)`), a `uint64` will be padded to occupy a full 32-byte word. Thus, for a function call with these three parameters, the payload would be `function_selector (4 bytes) + id (32 bytes) + value (32 bytes) + timestamp (32 bytes) = 100 bytes`. Achieving actual 8-byte usage for the timestamp in the calldata stream would require mechanisms like `abi.encodePacked` or custom serialization (e.g., CBOR), where the data isn't necessarily aligned to 32-byte words for individual parameters. For the purpose of this estimation, we consider the ~100 byte figure based on typical ABI encoding for function calls.
+On L1, calldata costs 16 gas/byte for non-zero bytes and 4 gas/byte for zero bytes (post EIP-2028). So 100 bytes, assuming a mix (e.g., ~30% zero bytes for a typical ABI blob), might cost in the range of 1,200–1,600 gas. This is negligible compared to the base cost
 of a transaction (21,000 gas) and any L1 execution.
 
 ### Gas Cost Benchmarks
@@ -493,10 +488,8 @@ of a transaction (21,000 gas) and any L1 execution.
 * **Direct On-Chain Oracle vs Cross-Chain:** Using a direct oracle (like Chainlink on L2) might cost ~50k
   gas per update (paying for an aggregator contract to store a value). An ERC-76xx cross-chain update
   would incur gas on L1 to dispatch and on L2 to execute. For example, dispatching via the Optimism
-  messenger involves writing an event on L1 (cost depends on event data size and storage of nonce). A
-  simple estimation: if an Optimism L1→L2 message contains ~3 words of data, the L1 cost might be ~ (event
-  emit 5k + 3 storage slots ~3*20k) ≈ 65k gas, plus the 1,600 calldata gas, so ~67k gas on L1. The L2
-  execution might cost ~25k gas to verify sender and store the value. Total ~92k gas plus the overhead of
+  messenger, the L1 execution cost for `sendMessage` (which involves one SSTORE for the nonce and a LOG, not three fresh storage slots per message) is typically around 41-47k gas before calldata (based on Bedrock tracer numbers, e.g., transaction `0x6f61d79a5a7851f7e53737000ac642dd21900b6561a44871a41094021689f6e7` on OP-Mainnet). To this, calldata gas must be added. So, the L1 cost might be in the range of ≈ 45k (average execution) + calldata gas (e.g., 1,200-1,600 gas as estimated above), resulting in an L1 cost of around 46,200-46,600 gas. Let's use ~47k gas for L1 execution cost in subsequent estimations. The L2
+  execution might cost ~25k gas to verify sender and store the value. Total (L1+L2 execution) ~72k gas plus the overhead of
   including the L1 transaction in a batch (amortized across many txs).
 * **Optimistic vs ZK Rollup:** On a ZK rollup (if a similar mechanism were used), there's no 7-day delay
   but proving might add cost. However, ERC-76xx as a standard doesn't mandate the rollup type. If used on
@@ -521,10 +514,10 @@ of a transaction (21,000 gas) and any L1 execution.
 
 As a concrete scenario, consider updating a price feed every 5 minutes from
 mainnet to Optimism:
-There are 12 updates per hour, 288 per day. At ~67k gas L1 each, that's ~19.3 million gas/day on L1.
-With gas price 10 gwei, and ETH at $1800, that's about 19.3e6 * 1e-8 ETH * 1800 ≈ $348/day. On L2,
+There are 12 updates per hour, 288 per day. At ~47k gas L1 each (as per revised estimate), that's ~13.54 million gas/day on L1.
+With ETH at $1800, and an L1 basefee of 10 gwei, this translates to about $244/day. However, L1 basefees vary; for example, if the basefee ranges from 6-15 gwei (as might be observed, e.g., Q2 2025 on OP-Mainnet for illustrative purposes), the daily L1 cost could range from approximately $146 to $365. On L2,
 288*25k = 7.2 million gas/day, but L2 gas is much cheaper (even if ~$0.001 per kGas, that's <$10/day).
-So this approach could cost a few hundred dollars a day for a continuously updating feed – likely
+So this approach could cost from a couple of hundred to several hundred dollars a day for a continuously updating feed – likely
 acceptable for a critical DeFi price, but too high for less critical data. By comparison, a dedicated
 L2 oracle posting directly might cost less on L1 (zero, since staying on L2), but then you rely on that
 separate oracle's trust model.
@@ -561,3 +554,25 @@ excessive gas overhead.
 * [EIP-712: Typed structured data hashing and signing](https://eips.ethereum.org/EIPS/eip-712)
 * [ERC-5164: Cross-Chain Execution](https://eips.ethereum.org/EIPS/eip-5164)
 * [Sending data between L1 and L2 | Optimism Docs](https://docs.optimism.io/app-developers/bridging/messaging)
+
+```mermaid
+graph TD;
+    A["L2 User/App sends Query for Data"] --> B{"ERC-76xx Provider on L2"};
+    B -- "Request for Fast Data" --> C["FastDataReporter Network (Off-chain Signers)"];
+    C -- "Signed Data (Off-chain)" --> B;
+    B -- "Verifies Signature & Freshness" --> D["Provide Data to User/App Quickly"];
+    C -- "Optionally, Batched Data/Proofs for Settlement" --> E{"Challenge/Verification Contract (L1 or L2)"};
+    E -- "Dispute Window / Verification Logic" --> F["Data Finalized or Challenged/Reverted"];
+    subgraph "Optimistic Fast Path"
+        direction LR
+        B
+        C
+        D
+    end
+    subgraph "Optional On-Chain Settlement/Challenge"
+        direction LR
+        E
+        F
+    end
+    G["Traditional Slow Path (e.g., Canonical Messenger)"] -.-> B;
+```
