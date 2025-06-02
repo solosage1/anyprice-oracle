@@ -1,5 +1,17 @@
 # ERC-76xx Refinement and Benchmarking Brief
 
+**TL;DR (1-minute view)**
+
+* **What it is:** ERC-76xx is a draft Ethereum standard from Solo Labs that defines a *versioned, chain-agnostic payload* for pushing time-sensitive oracle data across L1↔L2 and rollup↔rollup boundaries.
+* **Why it matters:** Existing oracle APIs (EIP-2362, 7726) stay on one chain; general cross-chain standards (EIP-5164, Bedrock CXM) ignore “freshness.” ERC-76xx adds an explicit *valid-until/timestamp field* and optional fast-path signatures so rollups get data **before it goes stale** without sacrificing trust minimisation.
+* **How it fits:** Built to ride any bridge—canonical messenger, EIP-5164, or third-party—while remaining *beacon-root-friendly* (EIP-4788) and CCIP-Read-complementary. It can plug directly into the OP-Stack “Superchain.”
+* **Core refinements:**
+
+  1. MUST include freshness + chain-ID fields.
+  2. SHOULD use EIP-712 signatures and Optimism messengers where available.
+  3. NICE-TO-HAVEs: governance hooks, ZK-proof extension point, unified naming.
+* **Key differentiator:** first open standard to treat *speed vs. finality* as a tunable parameter for oracle delivery—letting apps choose “fully trustless but slow,” “optimistic and fast,” or something in between.
+
 ## Introduction
 
 ERC-76xx is a proposed Ethereum standard (currently in draft by Solo Labs) that aims to enable
@@ -12,7 +24,7 @@ github.com
  to cross-chain execution frameworks like EIP-5164
 eips.ethereum.org
  – as
-well as Optimism's Bedrock canonical cross-domain messenger (CXM) model. We map ERC-76xx's positioning
+well as the OP Stack CXM v1 (per specs.optimism.io). We map ERC-76xx's positioning
 in the landscape, identify overlaps or conflicts, and highlight unique problems it solves for rollups.
 Finally, we propose concrete spec-level refinements with clear MUST/SHOULD/NICE-TO-HAVE classifications,
 present key differentiators for public messaging, and include a security risk register and technical
@@ -20,7 +32,7 @@ appendix with relevant calldata/gas benchmarks.
 
 ## Landscape: Oracles and Cross-Chain Standards
 
-### On-Chain Oracle Interfaces (EIP-2362, ERC-7726)
+### On-Chain Oracle Interfaces (EIP-2362, EIP-7726)
 
 Ethereum's earliest oracle standards focused on how
 contracts retrieve off-chain data values. EIP-2362 ("valueFor") defines a simple pull-based interface
@@ -30,9 +42,9 @@ github.com
 . All EIP-2362 providers use the same ID convention so
 that different oracles refer to the same data series
 github.com
-. However, EIP-2362 assumes a
+.[^1] However, EIP-2362 assumes a
 single-chain context – it does not account for cross-chain sources or the latency of obtaining data
-from L1 versus L2. More recently, ERC-7726 ("Common Quote Oracle") standardized an API for asset price
+from L1 versus L2. More recently, EIP-7726 ("Common Quote Oracle") standardized an API for asset price
 feeds (e.g., in draft-04 of the EIP): it introduces `quote(uint256 baseAmount, address base, address quote)` which returns how much of quote asset equals
 a given baseAmount of base asset
 eips.ethereum.org
@@ -41,7 +53,7 @@ eips.ethereum.org
 token amounts (e.g. 1e6 USDC in ETH terms) instead of floating price factors, improving consistency
 eips.ethereum.org
 .
-Like EIP-2362, ERC-7726 focuses on on-chain oracle adapters and does not inherently solve cross-chain
+Like EIP-2362, EIP-7726 focuses on on-chain oracle adapters and does not inherently solve cross-chain
 delivery – it presumes the data feed is available locally on the chain where it's queried.
 
 ### Off-Chain Data via CCIP-Read (EIP-3668)
@@ -120,7 +132,7 @@ specs.optimism.io
 standardized the messaging format (introducing a versioned nonce and support for sending ETH value with
 the message)
 specs.optimism.io
-. A crucial detail is latency: L1→L2 messages are relayed typically on the order of a few minutes (30 s to 15 m in practice), whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
+. A crucial detail is latency: L1→L2 messages are relayed typically on the order of a few minutes (typically 1–10 min, rarely >15 min.), whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
 docs.optimism.io
 docs.optimism.io
 .
@@ -131,9 +143,9 @@ using trusted relayers to forward data faster, both of which introduce new trust
 ### Beacon Chain Root as Oracle (EIP-4788)
 
 An emerging piece of the interoperability puzzle is EIP-4788,
-which will expose the Ethereum beacon chain's state root (specifically, the previous beacon-block root, typically one epoch or ≈ 4–12 min old) inside the EVM
+which will expose the Ethereum beacon chain's state root (specifically, the previous beacon-block root, typically one epoch or ≈ 6.4 min old) inside the EVM
 consensys.io
-. In essence,
+. The contract implementing EIP-4788 stores approximately one day of historical roots in a ring buffer. In essence,
 EIP-4788 is an enshrined oracle for Ethereum's consensus state
 consensys.io
 , allowing smart contracts
@@ -533,27 +545,23 @@ time-sensitive data (especially with aggregator contracts possibly batching mult
 message). It's important that the standard remains lean so that implementers are not deterred by
 excessive gas overhead.
 
+[^1]: The EIP-2362 specification *recommends* (SHOULD) a convention for `bytes32` feed IDs (typically derived from `keccak256(symbol, granularity)`), promoting interoperability. However, it does not mandate a single global registry or enforce this scheme, so adherence is de-facto.
+
 ## Citations
 
 * [GitHub - tellor-io/EIP-2362: Pull Oracle Interface](https://github.com/tellor-io/EIP-2362)
 * [ERC-5164: Cross-Chain Execution](https://eips.ethereum.org/EIPS/eip-5164)
-* [GitHub - tellor-io/EIP-2362: Pull Oracle Interface](https://github.com/tellor-io/EIP-2362)
-* [ERC-7726: Common Quote Oracle](https://eips.ethereum.org/EIPS/eip-7726)
+* [EIP-7726: Common Quote Oracle](https://eips.ethereum.org/EIPS/eip-7726)
 * [ERC-3668: CCIP Read—Secure offchain data retrieval](https://eips.ethereum.org/EIPS/eip-3668)
 * [CCIP-Read - ENS DAO Basics](https://basics.ensdao.org/ccip-read)
 * [Discussion EIP-3668: Use of CCIP read for transactions (CCIP write) - EIPs - Fellowship of Ethereum Magicians](https://ethereum-magicians.org/t/discussion-eip-3668-use-of-ccip-read-for-transactions-ccip-write/10977)
-* [ERC-5164: Cross-Chain Execution](https://eips.ethereum.org/EIPS/eip-5164)
-* [EIP-5164: Cross-Chain Execution | QX Interoperability - v.0.7](https://qualitax.gitbook.io/interop/industry-initiatives/eip-5164-cross-chain-execution)
 * [EIP-5164: Cross-Chain Execution | QX Interoperability - v.0.7](https://qualitax.gitbook.io/interop/industry-initiatives/eip-5164-cross-chain-execution)
 * [ERC-7092: Financial Bonds](https://eips.ethereum.org/EIPS/eip-7092)
 * [Messengers - OP Stack Specification](https://specs.optimism.io/protocol/messengers.html)
 * [Sending data between L1 and L2 | Optimism Docs](https://docs.optimism.io/app-developers/bridging/messaging)
 * [Ethereum Evolved: Dencun Upgrade Part 3, EIP-4788 | Consensys](https://consensys.io/blog/ethereum-evolved-dencun-upgrade-part-3-eip-4788)
 * [New ERC: Cross-chain broadcaster - ERCs - Fellowship of Ethereum Magicians](https://ethereum-magicians.org/t/new-erc-cross-chain-broadcaster/22927)
-* [GitHub - tellor-io/EIP-2362: Pull Oracle Interface](https://github.com/tellor-io/EIP-2362)
 * [EIP-712: Typed structured data hashing and signing](https://eips.ethereum.org/EIPS/eip-712)
-* [ERC-5164: Cross-Chain Execution](https://eips.ethereum.org/EIPS/eip-5164)
-* [Sending data between L1 and L2 | Optimism Docs](https://docs.optimism.io/app-developers/bridging/messaging)
 
 ```mermaid
 graph TD;
