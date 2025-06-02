@@ -3,14 +3,14 @@
 **TL;DR (1-minute view)**
 
 * **What it is:** ERC-76xx is a draft Ethereum standard from Solo Labs that defines a *versioned, chain-agnostic payload* for pushing time-sensitive oracle data across L1↔L2 and rollup↔rollup boundaries.
-* **Why it matters:** Existing oracle APIs (EIP-2362, 7726) stay on one chain; general cross-chain standards (EIP-5164, Bedrock CXM) ignore “freshness.” ERC-76xx adds an explicit *valid-until/timestamp field* and optional fast-path signatures so rollups get data **before it goes stale** without sacrificing trust minimisation.
-* **How it fits:** Built to ride any bridge—canonical messenger, EIP-5164, or third-party—while remaining *beacon-root-friendly* (EIP-4788) and CCIP-Read-complementary. It can plug directly into the OP-Stack “Superchain.”
+* **Why it matters:** Existing oracle APIs (EIP-2362, 7726) stay on one chain; general cross-chain standards (EIP-5164, Bedrock CXM) ignore "freshness." ERC-76xx adds an explicit *valid-until/timestamp field* enabling rollups to receive data with clear freshness guarantees via secure, established channels.
+* **How it fits:** For OP-Stack chains (Version 1.0), it relies exclusively on the canonical Bedrock messenger. It is also designed to be bridge-agnostic for other chains or future extensions, remaining *beacon-root-friendly* (EIP-4788) and CCIP-Read-complementary.
 * **Core refinements:**
 
   1. MUST include freshness + chain-ID fields.
-  2. SHOULD use EIP-712 signatures and Optimism messengers where available.
-  3. NICE-TO-HAVEs: governance hooks, ZK-proof extension point, unified naming.
-* **Key differentiator:** first open standard to treat *speed vs. finality* as a tunable parameter for oracle delivery—letting apps choose “fully trustless but slow,” “optimistic and fast,” or something in between.
+  2. For OP-Stack v1.0, MUST use canonical Bedrock CXM. For other chains/future extensions, SHOULD use EIP-712 signatures where applicable.
+  3. NICE-TO-HAVEs: governance hooks, ZK-proof extension point (for future extensions), unified naming.
+* **Key differentiator:** A key open standard aiming to provide time-sensitive data to rollups with verifiable freshness, leveraging the highest security transport available (e.g., canonical CXM for OP-Stack v1.0). Future extensions may explore a wider range of speed/finality trade-offs.
 
 ## Introduction
 
@@ -132,7 +132,7 @@ specs.optimism.io
 standardized the messaging format (introducing a versioned nonce and support for sending ETH value with
 the message)
 specs.optimism.io
-. A crucial detail is latency: L1→L2 messages are relayed typically on the order of a few minutes (typically 1–10 min, rarely >15 min.), whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
+. A crucial detail is latency: L1→L2 messages are relayed typically in a few minutes, bounded by the L2 proposer's submission cadence (see Optimism's documentation on [Cross-Domain Messaging](https://docs.optimism.io/app-developers/bridging/messaging) for specifics), whereas L2→L1 messages incur a ~7 day delay due to the optimistic rollup fraud-proof window
 docs.optimism.io
 docs.optimism.io
 .
@@ -216,7 +216,7 @@ the same chain ID numbering as EIP-7092 and EIP-5164 for consistency).
 The OP messenger is an implementation, not a standard, but it's
 widely used. If ERC-76xx defines its own cross-domain message format for data, there's a risk of
 duplicating what Bedrock already provides. Overlap exists in that both define a message structure (nonce,
-sender, target, data, etc.). The ERC should strive to be compatible – e.g., perhaps recommending that on
+sender, target, data, etc.). ERC-76xx operates at the application layer; its specialized fields (like freshness or expiry timestamps) are contained *within* the `messageData` payload of the underlying CXM call, not as modifications to the CXM header or Bedrock contracts themselves. The ERC should strive to be compatible – e.g., perhaps recommending that on
 Optimism-class rollups, an ERC-76xx message should be sent via the canonical messenger contract (rather
 than a custom bridge). This avoids conflict and leverages the security of the L1-provided mechanism.
 Where the canonical path is too slow (L2→L1), ERC-76xx could specify an alternate faster path, but it
@@ -231,11 +231,7 @@ No existing standard cleanly addresses fast, trust-minimized data updates to rol
 * EIP-5164 provides a container to ship a message, but doesn't say when or how quickly it must be
   delivered. Nor can a receiving contract easily reject a too-old message without a convention – a gap
   ERC-76xx could fill by including timestamps or expirations in the message format.
-* Bedrock's CXM enforces the 7-day delay for L2→L1 messages; any faster scheme (like circumventing the
-  fraud window) inherently adds trust assumptions. There's a conflict here between "time-sensitive" and
-  "fully trustless." ERC-76xx will need to reconcile this by either choosing one side (e.g. must be
-  fully trustless even if slow) or allowing an opt-in faster route (e.g. a message that is tentative
-  until finalized). This could conflict with bridge neutrality unless carefully specified.
+* Bedrock's CXM enforces the 7-day delay for L2→L1 messages. For L1→L2 messages, while timely, it adheres to the canonical security model. ERC-76xx Version 1.0, for OP-Stack chains, explicitly commits to this canonical model and its inherent security properties (including any associated delays for L2→L1). Proposals for alternative, faster (and potentially less trust-minimized) schemes for OP-Stack chains are out of scope for v1.0 and would need to be specified in separate extension profiles with their own security analyses.
 * There is potential overlap with Chainlink's Cross-Chain Interoperability Protocol (CCIP) which was
   not an EIP at the time of writing. CCIP is an off-chain service and protocol for cross-chain data and
   token transfers. While not a formal standard in Ethereum, it targets similar goals. A differentiator
@@ -277,17 +273,11 @@ that "the right now" state on Chain A is reflected on Chain B before it becomes 
 
 ### Granular Trust and Governance
 
-Another problem ERC-76xx tackles is how to balance trust and speed.
-Between the extremes of fully-trusted (one server simply telling L2 the data) and fully-trustless
-(wait for finality or validity proof), there's a spectrum. For instance, a design could allow a set of
-governance-approved signers (or an optimistic oracle) to publish data to L2 quickly, which becomes
-canonical if not disputed within some window. This resembles how optimistic bridges or Oracle DAOs
-work, but ERC-76xx can make it an opt-in feature of the standard. The spec can define roles like
-"FastDataReporter" and "DataChallenger", giving applications the choice to accept fast data with an
-insurability or governance backstop. Crucially, time-sensitive financial apps can't wait for absolute
-finality, so ERC-76xx provides a structured compromise where speed is gained at the cost of
-introducing slashing conditions or fallback mechanisms. No prior Ethereum standard explicitly
-addresses this niche.
+ERC-76xx aims to enable applications to manage how they balance trust and speed. However, for Version 1.0 implementations on OP-Stack chains, the standard defers to the established security model of the canonical Bedrock Cross-Domain Messenger. This prioritizes safety-over-liveness and trust-minimization by leveraging Ethereum-level security guarantees inherent in the canonical bridge.
+
+While the broader ERC-76xx framework may eventually accommodate various trust models as optional extensions or for use on other (non-OP-Stack) chains – spanning from fully-trusted (e.g., a single permissioned relayer) to fully-trustless (e.g., L1 finality proofs) – these are not part of the v1.0 specification for OP-Stack. For example, future extensions (e.g., an "ERC-76xx-OPT" profile) might define roles like "FastDataReporter" (potentially bonded and subject to slashing) and "DataChallenger" for applications explicitly opting into non-canonical, faster paths after careful consideration of the associated risks and security assumptions.
+
+For v1.0 on OP-Stack, the focus is on providing time-sensitive data with verifiable freshness through the most secure, canonical mechanism available. Applications requiring different trust assumptions (e.g., for ultra-low latency use cases not primarily targeted by the Superchain mission) would need to await or propose such specific extension profiles, which would require their own rigorous security analysis and governance approval separate from the core ERC-76xx standard.
 
 ### Bedrock Alignment for L2s
 
@@ -306,6 +296,7 @@ the box today.
 Based on the above analysis, we propose the following refinements to the ERC-76xx draft specification.
 Each item is marked as MUST, SHOULD, or NICE-TO-HAVE to indicate priority:
 
+* **MUST:** Define Transport for Version 1.0 on OP-Stack Chains. Version 1.0 of ERC-76xx MUST use the canonical Bedrock Cross-Domain Messenger (CXM) as its exclusive transport mechanism for messages to and from OP-Stack chains. This ensures maximum alignment with the Superchain security model, inheriting Ethereum-level security. 'Fast-Path' schemes (e.g., bonded optimistic relays, ZK-proof shortcuts, or privileged signer quorums) that bypass the canonical CXM are explicitly out of scope for the core v1.0 specification for OP-Stack chains. Such schemes MAY be proposed in the future as distinct ERC-76xx Extension profiles (e.g., "ERC-76xx-OPT") once their security, economic models, and governance implications have been thoroughly field-tested and specified.
 * **MUST:** Include a Data Freshness Field. The standard message format should include either an explicit
   timestamp (when the data was fetched or signed) or an expiry time after which the data is considered
   stale. This allows receiving contracts to reject or ignore outdated messages. For example, a price
@@ -324,8 +315,8 @@ Each item is marked as MUST, SHOULD, or NICE-TO-HAVE to indicate priority:
   compatibility with EIP-5164 (which will likely use chain IDs too) and prevents misrouting. The spec
   should clearly state that chain IDs are part of the message signature to prevent replay of a message
   meant for one network on another.
-* **SHOULD:** Leverage EIP-712 for Off-Chain Signatures. If ERC-76xx allows or encourages any off-chain
-  components (like a relayer network or oracle signers), it should adopt EIP-712 structured data signing
+* **SHOULD:** Leverage EIP-712 for Off-Chain Signatures. If future extensions of ERC-76xx, or its use on non-OP Stack chains, allow or encourage any off-chain
+  components (like a relayer network or oracle signers for alternative transport mechanisms), it should adopt EIP-712 structured data signing
   for any signed payloads. EIP-712 provides domain separation and a clear schema for signing data
   eips.ethereum.org
   ,
@@ -333,17 +324,12 @@ Each item is marked as MUST, SHOULD, or NICE-TO-HAVE to indicate priority:
   structure named DataUpdate with fields (sourceChainID, dataID, value, timestamp, etc.), and require
   that any off-chain signature conform to that. This makes verification on-chain straightforward and uses
   battle-tested libraries and wallet support (Metamask, ethers.js, etc., all support EIP-712 signing).
-* **SHOULD:** Specify Integration with Optimism-Style Messengers. For rollups that have an official
-  CXM (Optimism, Arbitrum, etc.), ERC-76xx should outline how to use it as the transport. For example,
-  "On OP Stack chains, an ERC-76xx provider contract SHOULD send L1→L2 data via the
+* **MUST (for OP-Stack v1.0):** Specify Integration with Optimism Canonical Messenger. For OP-Stack chains, Version 1.0 of ERC-76xx provider contracts MUST send L1→L2 data via the canonical
   L1CrossDomainMessenger.sendMessage function
   specs.optimism.io
-  . The format of the message data payload MUST
-  match the ERC-76xx struct." This ensures that we aren't reinventing a delivery mechanism where a proven
-  one exists. Similarly, for L2→L1 (or L2→L2 via L1), the spec should clarify that the typical 7-day delay
-  applies if using the canonical path, so implementers can decide if they need an optimistic fast path.
-  Providing code examples for common cases (like an L1 contract pushing to L2) would be beneficial.
-* **SHOULD:** Compatibility with EIP-5164 Dispatcher/Executor. While not strictly required, the ERC-76xx
+  . The ERC-76xx specific fields like freshness or expiry timestamps are part of the application-level calldata (`_message` argument to `sendMessage`), not a modification to Bedrock's CXM headers or contracts. The format of the message data payload MUST
+  match the ERC-76xx struct. This ensures that the standard utilizes the most secure and audited delivery mechanism available on these chains and makes clear that Bedrock itself remains unchanged. Similarly, for L2→L1 messages (or L2→L2 messages relayed via L1), the spec MUST clarify that the typical ~7-day fraud proof window delay applies when using this canonical path.
+* **SHOULD (for non-OP Stack chains or future extensions):** Compatibility with EIP-5164 Dispatcher/Executor. For chains not part of the OP Stack, or for future extensions of ERC-76xx that might define alternative transport mechanisms, the ERC-76xx
   contract could implement the MessageDispatcher interface from EIP-5164 for sending its updates, and
   the MessageExecutor on the receiving side
   eips.ethereum.org
@@ -351,6 +337,7 @@ Each item is marked as MUST, SHOULD, or NICE-TO-HAVE to indicate priority:
   to any bridges that support EIP-5164, essentially for free. It aligns with the bridge-neutral philosophy.
   If full interface implementation is too much overhead, the spec at least should not conflict – e.g.
   reserve messageId or event names similarly to avoid collisions.
+* **NICE-TO-HAVE:** Integration with Future OP Stack Interoperability Mechanisms. The Optimism ecosystem is continuously evolving. For instance, OP Labs is developing an Attestation Bus, a lightweight storage-proof broadcaster for Superchain interoperability. When such mechanisms become standardized and available, ERC-76xx messages (particularly those intended for broad Superchain consumption) SHOULD be serializable into these channels (e.g., as a specific message type like `0x02` if the Attestation Bus defines such). This aligns ERC-76xx with the broader Superchain vision and avoids redundant infrastructure. Implementers should monitor OP Stack developments for such integration opportunities.
 * **NICE-TO-HAVE:** Governance Hooks for Data Providers. To enhance security, the standard could allow
   each ERC-76xx data feed contract to have a configurable list of authorized publishers and possibly a
   governance delay. For instance, a feed might be upgradable (via a DAO vote) to change who can post
@@ -358,8 +345,8 @@ Each item is marked as MUST, SHOULD, or NICE-TO-HAVE to indicate priority:
   often application-specific, providing a recommended template (such as OpenZeppelin's AccessControl or a
   timelock on critical parameter changes) would help implementers avoid mistakes. This is not an absolute
   requirement of the spec, but outlining it as a best practice (SHOULD) is prudent given the varying trust
-  models. The goal is that no single operator should have unchecked power over a critical cross-chain feed
-  without some ability for oversight or upgrade.
+  models. Specifically for OP Stack chains, any such governance mechanism should consider integration with the chain's prevailing security model; for example, the same `isPausedBySecurityCouncil()` check (or equivalent mechanism as defined by the specific Superchain's governance) SHOULD gate `receiveUpdate()` (or the primary data-receiving function of an ERC-76xx implementation) so oracle pushes automatically pause during L2 incidents managed by the Security Council. The goal is that no single operator should have unchecked power over a critical cross-chain feed
+  without some ability for oversight or upgrade, and that on-chain safety mechanisms are respected.
 * **NICE-TO-HAVE:** Unified Naming and Alignment. During the draft review, check all function and event
   names against existing standards to avoid confusion. For example, if the spec currently calls the update
   function pushData, consider whether relayData or sendData would better convey its cross-chain nature
@@ -382,23 +369,15 @@ likelihood, and NICE-TO-HAVE items provide future flexibility without bogging do
 
 ## Key Differentiators of ERC-76xx
 
-Solo Labs can highlight the following unique selling points of ERC-76xx in public communications:
-* 🚀 **Real-Time Cross-Chain Data:** ERC-76xx is the first oracle-specific Ethereum standard that bakes time-to-freshness directly into the payload.
-* 🔗 **Built for Rollup Interoperability:** Designed with Optimism's Bedrock and similar L2s in mind,
-  ERC-76xx seamlessly plugs into the OP Stack "Superchain" model. It complements the canonical messenger
-  by adding data validity windows and optional faster paths, solving pain points specific to optimistic
-  rollups.
-* 🛡️ **Trust-Minimized yet Flexible:** Unlike proprietary cross-chain oracle solutions, ERC-76xx is an
-  open standard that lets projects choose their security mode – fully trustless (using on-chain proofs) or
-  optimistically fast (with verifiable off-chain signatures and challenge periods). It's adaptable to
-  different risk profiles.
+Solo Labs can highlight the following unique selling points of ERC-76xx in public communications, keeping in mind the collaborative nature of standards development and Optimism's ongoing work on initiatives like their Bridge Neutrality and Standardised Proofs roadmap:
+* 🚀 **Oracle-Specific Standard for Real-Time Data:** ERC-76xx is a pioneering oracle-specific Ethereum standard that formalizes the inclusion of time-to-freshness directly into the payload.
+* 🔗 **Built for Rollup Interoperability (Canonical First on OP-Stack):** For Version 1.0 on OP-Stack chains, ERC-76xx mandates the use of the canonical Bedrock messenger, ensuring maximum security and alignment with the Superchain vision. Its design also supports other transports for non-OP chains or future extensions.
+* 🛡️ **Trust-Minimized by Design (for OP-Stack v1.0):** By leveraging the canonical CXM on OP-Stack chains for its v1.0, ERC-76xx inherits Ethereum-level security without introducing new trust assumptions for this primary use case. Future extensions for other contexts might explore a broader range of trust assumptions, but these would be separate, opt-in profiles.
 * 🤝 **Unified Interface:** ERC-76xx unifies concepts from multiple prior EIPs (oracle queries, cross-chain
   calls, off-chain reads) into a single interface. Developers integrate once and gain access to data
-  feeds that work across Ethereum, L2s, and sidechains, with no custom adapters per chain.
-* ⚙️ **Governable and Upgradeable:** The standard anticipates the need for governance hooks – for example,
-  to rotate oracle signers or switch bridges if needed. This ensures longevity: projects adopting ERC-76xx
-  won't be locked into one provider and can evolve with the ecosystem.
-* 📊 **Gas and Bandwidth Optimized:** By standardizing the data format and transport, ERC-76xx enables
+  feeds that work across Ethereum, L2s, and sidechains, with no custom adapters per chain for the core data format.
+* ⚙️ **Governable and Upgradeable (within Canonical Constraints for OP-Stack v1.0):** The standard anticipates the need for governance hooks. For OP-Stack v1.0, this operates within the security and governance framework of the canonical messenger and the Superchain (e.g., respecting Security Council pauses). Future extensions might define more elaborate governance for alternative transport mechanisms.
+* 📊 **Gas and Bandwidth Optimized:** By standardizing the data format and transport (via canonical messengers for OP-Stack v1.0), ERC-76xx enables
   batching and efficient use of calldata. Preliminary benchmarks show that cross-chain data updates can be
   delivered with minimal overhead beyond the raw data size (see Appendix), making it cost-effective even
   as frequency scales.
@@ -408,18 +387,17 @@ makes ERC-76xx different.)
 
 ## Security Risk Register
 
-Implementing ERC-76xx entails several risks which should be catalogued and managed:
+Implementing ERC-76xx entails several risks which should be catalogued and managed. The following register considers risks applicable to the standard in general. For Version 1.0 implementations on OP-Stack chains, which exclusively use the canonical Bedrock Cross-Domain Messenger, certain risks (particularly those related to alternative, non-canonical transport layers or off-chain signers) are largely mitigated by the inherent security of the L1 and the canonical messenger. However, these risks remain relevant for potential future ERC-76xx extensions that might define such alternative paths, or for implementations on non-OP-Stack chains using different transport mechanisms.
+
 * **Stale Data / Timing Risk:** A data update might arrive or be executed after its intended validity
   window, potentially leading contracts to act on outdated information. Mitigation: Include
   timestamps/expiries in messages and have receivers check them (per spec). If an update is too old, it
   should be ignored. Also, design the system so critical updates are sent with some time margin or
   repeated if needed.
-* **Oracle Manipulation:** If using an optimistic fast path (trusted relayers or signers), a malicious or
-  compromised actor could inject false data on the target chain. Mitigation: Require multiple
-  independent signers (quorum) for fast updates, and use a challenge period where conflicting proof can
-  overwrite false data. Align incentives by slashing or economic security (like a bond posted by relayers
-  that is slashed on bad data). Additionally, limit the scope: e.g., cap how far the data can deviate, to
-  catch anomalies.
+* **Oracle Manipulation:** This risk primarily concerns scenarios where data can be injected or altered by non-canonical actors (e.g., via a compromised fast-path relayer or a malicious signer quorum in a hypothetical future extension or a non-OP-Stack implementation). Mitigation for such scenarios would typically involve: requiring multiple
+  independent signers (quorum) for fast updates, using a challenge period where conflicting proof can
+  overwrite false data, and aligning incentives by slashing or economic security (like a bond posted by relayers
+  that is slashed on bad data). Additionally, limiting the scope (e.g., cap how far the data can deviate) can help catch anomalies. For ERC-76xx Version 1.0 on OP-Stack chains, this risk is significantly minimized as data integrity relies on the security of the L1 source and the canonical Bedrock CXM; manipulation would require compromising L1 itself or the Bedrock bridge contracts.
 * **Replay Attacks:** A valid data message on one chain could be replayed on another chain, or the same
   message applied twice, if not uniquely identified. Mitigation: Use chainId and nonce in the message.
   Each update ID should be unique (perhaps a combination of source chain, sequence number, and feed ID).
@@ -500,7 +478,7 @@ of a transaction (21,000 gas) and any L1 execution.
 * **Direct On-Chain Oracle vs Cross-Chain:** Using a direct oracle (like Chainlink on L2) might cost ~50k
   gas per update (paying for an aggregator contract to store a value). An ERC-76xx cross-chain update
   would incur gas on L1 to dispatch and on L2 to execute. For example, dispatching via the Optimism
-  messenger, the L1 execution cost for `sendMessage` (which involves one SSTORE for the nonce and a LOG, not three fresh storage slots per message) is typically around 41-47k gas before calldata (based on Bedrock tracer numbers, e.g., transaction `0x6f61d79a5a7851f7e53737000ac642dd21900b6561a44871a41094021689f6e7` on OP-Mainnet). To this, calldata gas must be added. So, the L1 cost might be in the range of ≈ 45k (average execution) + calldata gas (e.g., 1,200-1,600 gas as estimated above), resulting in an L1 cost of around 46,200-46,600 gas. Let's use ~47k gas for L1 execution cost in subsequent estimations. The L2
+  messenger, the L1 execution cost for `sendMessage` (which involves one SSTORE for the nonce and a LOG, not three fresh storage slots per message) is typically around 41-47k gas[^2] before calldata (based on Bedrock tracer numbers, e.g., transaction `0x6f61d79a5a7851f7e53737000ac642dd21900b6561a44871a41094021689f6e7` on OP-Mainnet). To this, calldata gas must be added. So, the L1 cost might be in the range of ≈ 45k (average execution) + calldata gas (e.g., 1,200-1,600 gas as estimated above), resulting in an L1 cost of around 46,200-46,600 gas. Let's use ~47k gas (midpoint of 41-47k range, see footnote) for L1 execution cost in subsequent estimations. The L2
   execution might cost ~25k gas to verify sender and store the value. Total (L1+L2 execution) ~72k gas plus the overhead of
   including the L1 transaction in a batch (amortized across many txs).
 * **Optimistic vs ZK Rollup:** On a ZK rollup (if a similar mechanism were used), there's no 7-day delay
@@ -534,18 +512,19 @@ acceptable for a critical DeFi price, but too high for less critical data. By co
 L2 oracle posting directly might cost less on L1 (zero, since staying on L2), but then you rely on that
 separate oracle's trust model.
 
-If instead an optimistic fast path with a signer is used, L1 might not be hit at all for each update
+Future extensions (e.g., an "ERC-76xx-OPT" profile) might define alternative transport mechanisms such as an optimistic fast path with a bonded signer. In such a hypothetical scenario, L1 might not be hit at all for each update
 (the signer could post directly on L2, costing maybe 50k gas on L2 per update, which is a few cents).
 But then an occasional reconciliation or proof might be posted on L1 (like once a day or only when
-challenged). This hybrid can drastically cut costs, at the expense of some trust in the interim.
-ERC-76xx could allow such flexibility (e.g., modes of operation).
+challenged). This hybrid approach could drastically cut costs for those specific, opt-in use cases, at the expense of introducing different trust assumptions and security considerations that would need to be clearly defined and approved within that extension's specification.
+ERC-76xx v1.0 for OP-Stack chains, however, commits to the canonical path for maximum security.
 
-The above calculations illustrate that ERC-76xx's approach is economically feasible for high-value,
+The above calculations illustrate that ERC-76xx's approach, when using the canonical messenger, is economically feasible for high-value,
 time-sensitive data (especially with aggregator contracts possibly batching multiple values per
 message). It's important that the standard remains lean so that implementers are not deterred by
 excessive gas overhead.
 
 [^1]: The EIP-2362 specification *recommends* (SHOULD) a convention for `bytes32` feed IDs (typically derived from `keccak256(symbol, granularity)`), promoting interoperability. However, it does not mandate a single global registry or enforce this scheme, so adherence is de-facto.
+[^2]: The ~47k gas figure for `L1CrossDomainMessenger.sendMessage` is an approximate average observed on OP Mainnet around April 2025. Actual gas can vary (±15% or more) depending on factors like storage slot warmth and batch submission context. Implementers should benchmark for their specific use case.
 
 ## Citations
 
@@ -565,22 +544,29 @@ excessive gas overhead.
 
 ```mermaid
 graph TD;
-    A["L2 User/App sends Query for Data"] --> B{"ERC-76xx Provider on L2"};
-    B -- "Request for Fast Data" --> C["FastDataReporter Network (Off-chain Signers)"];
-    C -- "Signed Data (Off-chain)" --> B;
-    B -- "Verifies Signature & Freshness" --> D["Provide Data to User/App Quickly"];
-    C -- "Optionally, Batched Data/Proofs for Settlement" --> E{"Challenge/Verification Contract (L1 or L2)"};
-    E -- "Dispute Window / Verification Logic" --> F["Data Finalized or Challenged/Reverted"];
-    subgraph "Optimistic Fast Path"
+    subgraph "L2 Application Logic"
         direction LR
-        B
-        C
-        D
+        App["L2 User/App<br/>sends Query for Data"]
+        Provider["ERC-76xx Provider on L2<br/>(Parses Freshness, etc.)"]
+        App --> Provider
     end
-    subgraph "Optional On-Chain Settlement/Challenge"
+
+    subgraph "ERC-76xx v1.0 Transport on OP-Stack Chains"
+        direction TB
+        DataSrc["Data Source (e.g., L1 Contract / Off-Chain Oracle)"] -- "1. Data Payload with Freshness" --> L1Adapter["ERC-76xx L1 Adapter Contract"]
+        L1Adapter -- "2. Calls L1CrossDomainMessenger.sendMessage<br/>(Contains ERC-76xx Payload in _message)" --> CXM{Canonical Bedrock CXM<br/>(L1CrossDomainMessenger)}
+        CXM -- "3. Relays Message to L2" --> L2Messenger["L2CrossDomainMessenger"]
+        L2Messenger -- "4. Delivers ERC-76xx Payload to<br/>L2 ERC-76xx Provider" --> Provider
+    end
+
+    Provider -- "5. Provides Verified, Fresh Data to App" --> App
+
+    classDef canonicalOpStack fill:#DFF0D8,stroke:#3C763D,color:#3C763D;
+    class CXM,L1Adapter,L2Messenger,DataSrc canonicalOpStack;
+
+    subgraph "Note on Alternative Paths (Future Extensions / Non-OP Stack)" 
         direction LR
-        E
-        F
+        PotentialFuture["Alternative transport mechanisms (e.g., optimistic relays, other bridges, direct signer paths) are out of scope for ERC-76xx v1.0 on OP-Stack chains. They may be defined in future ERC-76xx Extension Profiles or used for ERC-76xx implementations on other (non-OP-Stack) chains, each with their own specific trust and security assumptions."]
     end
-    G["Traditional Slow Path (e.g., Canonical Messenger)"] -.-> B;
+    style PotentialFuture fill:#F9F9F9,stroke:#CCC,color:#555,stroke-dasharray: 5 5;
 ```
