@@ -544,14 +544,14 @@ excessive gas overhead.
 
 ```mermaid
 graph TD
-    subgraph "L2 Application Logic"
+    subgraph L2_Logic[L2 Application Logic]
         direction LR
         App["L2 User/App<br>sends Query for Data"]
         Provider["ERC-76xx Provider on L2<br>Parses Freshness, etc."]
         App --> Provider
     end
 
-    subgraph "ERC-76xx v1.0 Transport on OP-Stack Chains"
+    subgraph Transport[ERC-76xx v1.0 Transport on OP-Stack Chains]
         direction TB
         DataSrc["Data Source<br>L1 Contract / Off-Chain Oracle"] -- "1. Data Payload with Freshness" --> L1Adapter["ERC-76xx L1 Adapter Contract"]
         L1Adapter -- "2. Calls sendMessage with<br>ERC-76xx Payload" --> CXM["Canonical Bedrock CXM<br>L1CrossDomainMessenger"]
@@ -564,7 +564,7 @@ graph TD
     classDef canonicalOpStack fill:#DFF0D8,stroke:#3C763D,color:#3C763D
     class CXM,L1Adapter,L2Messenger,DataSrc canonicalOpStack
 
-    subgraph "Note on Alternative Paths" 
+    subgraph Note[Note on Alternative Paths]
         direction LR
         PotentialFuture["Alternative transport mechanisms<br>are out of scope for v1.0 on OP-Stack.<br>May be defined in future extensions."]
     end
