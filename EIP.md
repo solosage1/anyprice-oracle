@@ -528,32 +528,32 @@ excessive gas overhead.
 
 ```mermaid
 graph TD
-    subgraph L2_Source_Optimism [L2 Source Chain (e.g., Optimism Mainnet)]
+    subgraph L2SourceOptimism["L2 Source Chain - Optimism"]
         direction LR
-        AppSrc["ERC-76xx App/Adapter on Optimism"]
-        SIM_L2ToL2Messenger_Optimism["`L2ToL2CrossDomainMessenger` on Optimism"]
-        AppSrc -->|`sendMessage(destChainId, target, erc76xxPayload, gasLimit)`| SIM_L2ToL2Messenger_Optimism
+        AppSrc["ERC-76xx App/Adapter"]
+        SIM_L2ToL2Messenger["L2ToL2CrossDomainMessenger"]
+        AppSrc -->|"sendMessage()"| SIM_L2ToL2Messenger
     end
 
-    subgraph Relayer_Supervisor [OP Supervisor / Relayer Network]
+    subgraph RelayerSupervisor["OP Supervisor Network"]
         direction TB
-        Relayer["Supervisor relays message based on `SentMessage` event"]
+        Relayer["Supervisor/Relayer"]
     end
-    SIM_L2ToL2Messenger_Optimism -->|Emits `SentMessage` event| Relayer
+    SIM_L2ToL2Messenger -->|"SentMessage event"| Relayer
 
-    subgraph L2_Destination_Unichain [L2 Destination Chain (e.g., Unichain)]
+    subgraph L2DestUnichain["L2 Destination Chain - Unichain"]
         direction LR
-        SIM_CrossL2Inbox_Unichain["`CrossL2Inbox` on Unichain"]
-        ERC76xxProviderDest["ERC-76xx Provider on Unichain\n(receiveUpdate method)"]
+        SIM_CrossL2Inbox["CrossL2Inbox"]
+        ERC76xxProviderDest["ERC-76xx Provider"]
         
-        SIM_CrossL2Inbox_Unichain -->|Calls `receiveUpdate(id, value, timestamp)`| ERC76xxProviderDest
+        SIM_CrossL2Inbox -->|"receiveUpdate()"| ERC76xxProviderDest
     end
-    Relayer -->|Submits message to| SIM_CrossL2Inbox_Unichain
+    Relayer -->|"Submit"| SIM_CrossL2Inbox
 
     classDef simStyle fill:#E6F7FF,stroke:#0066CC,color:#003366
-    class SIM_L2ToL2Messenger_Optimism,SIM_CrossL2Inbox_Unichain,Relayer simStyle
+    class SIM_L2ToL2Messenger,SIM_CrossL2Inbox,Relayer simStyle
 
-    subgraph UserAppDest [User Application on Destination]
-        AppDestUser["L2 User/App on Unichain"] -->|Queries data| ERC76xxProviderDest
+    subgraph UserAppDest["User Application"]
+        AppDestUser["L2 User/App"] -->|"Query"| ERC76xxProviderDest
     end
 ```
