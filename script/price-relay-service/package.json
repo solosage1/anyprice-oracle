@@ -1,0 +1,29 @@
+{
+    "name": "price-relay-service",
+    "version": "1.0.0",
+    "description": "Manual relay service for L2-L2 price messages",
+    "main": "src/index.ts",
+    "type": "module",
+    "scripts": {
+        "start": "tsx src/index.ts",
+        "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "keywords": [
+        "optimism",
+        "superchain",
+        "l2tol2",
+        "relay",
+        "viem"
+    ],
+    "author": "",
+    "license": "ISC",
+    "devDependencies": {
+        "@types/node": "^20.0.0"
+    },
+    "dependencies": {
+        "@eth-optimism/viem": "^0.3.2",
+        "dotenv": "^16.0.0",
+        "tsx": "^4.0.0",
+        "viem": "^2.0.0"
+    }
+}

@@ -2,209 +2,224 @@
 
 **⚡ Fetch real-time asset prices from any chain, using a single call. Modular. Composable. No lock-in.**
 
-## 🚀 What It Does
+## 🎯 Problem
 
-AnyPrice is a cross-chain oracle framework that lets your dApp on Optimism (or any L2) fetch price data from remote chains like UniChain as if it were local.
+Accessing up-to-date price oracle data across different blockchain ecosystems (especially L2s) is fragmented and complex. dApps on one chain (e.g., Optimism) often need price data for assets whose primary liquidity and reliable oracle source exist on another chain (e.g., a different OP Stack chain, or potentially Uniswap V4 on Ethereum L1 in the future). Standard solutions involve cumbersome bridging, custom relayers, or reliance on centralized oracle providers who may not support all desired chains or assets immediately.
 
-### Use Case
+## ✨ Solution: AnyPrice
 
-You're on Optimism. The asset you want to price only has liquidity on UniChain.
+AnyPrice is a cross-chain oracle framework enabling dApps on Optimism (or any L2) to fetch price data from remote chains *as if it were local*.
 
-**Normally? You'd need to:**
-* Bridge data manually
-* Set up custom relayers
-* Handle async flows
-* Deal with mismatched oracle formats
+**Example:** You're on OP Sepolia. The asset you need to price only has a reliable Uniswap V4 oracle (`TruncGeoOracleMulti`) deployed on Base Sepolia.
 
 **With AnyPrice, you just call:**
 
 ```solidity
-CrossChainPriceResolver.resolvePrice("TOKEN", uniChainId);
+// In your contract on OP Sepolia
+CrossChainPriceResolver.resolvePrice("TOKEN_POOL_ID", baseSepoliaChainId); 
 ```
 
-✅ You get a fresh, validated price  
-✅ Backed by registered oracle adapters  
-✅ Delivered cross-chain via L2-native messaging
+✅ You get a fresh, validated price from Base Sepolia.  
+✅ Data sourced from a registered, chain-specific oracle adapter (`PriceSenderAdapter`).  
+✅ Delivered securely and efficiently via Optimism's native L2-to-L2 messaging.
+
+## 🔗 Hackathon Relevance (Optimism x Uniswap Interoperability)
+
+AnyPrice directly addresses the hackathon theme by demonstrating powerful interoperability:
+
+1. **Optimism Native Messaging:** Leverages the canonical `L2ToL2CrossDomainMessenger` predeploy for secure and efficient data transfer *between* Optimism ecosystem chains (OP Stack L2s). This showcases a core piece of Optimism's interoperability infrastructure.
+2. **Uniswap V4 Oracle Integration:** Consumes price data from `TruncGeoOracleMulti`, a custom Uniswap V4 compatible oracle designed for multi-pool TWAP-like data with manipulation resistance (via truncated observations). This demonstrates accessing and utilizing next-generation Uniswap oracle data across chains.
+3. **Modular Design:** The adapter pattern (`PriceSenderAdapter`, `PriceReceiverResolver`) allows integrating *any* source oracle and potentially *any* messaging layer, promoting a composable cross-chain future.
 
 ## 🧱 How It Works
 
-### 🛰 1. Oracle Adapter System
+### 🛰 1. Source Oracle & Sender (Chain A - e.g., Base Sepolia)
 
-Each chain (e.g., UniChain) hosts its own OracleRegistry, which maps token symbols to custom OracleAdapters.
+* A source oracle (here, `TruncGeoOracleMulti`, compatible with Uniswap V4 pools) provides price data.
+* The `PriceSenderAdapter` contract is deployed on Chain A.
+* When triggered (e.g., off-chain keeper), `PriceSenderAdapter`:
+  * Fetches the latest price from `TruncGeoOracleMulti`.
+  * Formats it into a message payload.
+  * Calls `sendMessage` on Chain A's `L2ToL2CrossDomainMessenger` predeploy.
 
-Adapters implement a unified interface to fetch raw prices from native oracles.
+### 🔁 2. L2-to-L2 Cross-Chain Messaging (Optimism Protocol)
 
-### 🔁 2. Cross-Chain Messaging
+* The message from Chain A's messenger is routed to Chain B's (e.g., OP Sepolia) `L2ToL2CrossDomainMessenger`.
+* This relies on Optimism's underlying cross-chain communication infrastructure.
+* Message relaying (execution on Chain B) can be automatic (e.g., local `supersim --autorelay`) or require manual relaying via an off-chain service calling `relayMessage` on Chain B's messenger.
 
-Using the CrossChainMessenger (based on Optimism's ICrossDomainMessenger), price requests are routed to the target chain, processed, and responded to.
+### 🧠 3. Price Reception & Validation (Chain B - e.g., OP Sepolia)
 
-### 🧠 3. Local Price Resolution
-
-CrossChainPriceResolver acts as the main interface. It abstracts away messaging, validation, and normalization. For the dApp, it looks like a single unified price feed.
+* The `PriceReceiverResolver` contract is deployed on Chain B.
+* It receives the message *only* from Chain B's `L2ToL2CrossDomainMessenger`.
+* It validates:
+  * `msg.sender` is the official L2-L2 messenger.
+  * The original sender on Chain A (`PriceSenderAdapter`) and source Chain ID are registered/authorized.
+  * The price data timestamp is fresh (not stale or future-dated).
+* If valid, it stores the price locally.
+* Your dApp on Chain B calls `PriceReceiverResolver.getPrice(...)` to access the data.
 
 ## 📦 Architecture Overview
 
-```
-+--------------------------+
-|  Your dApp (Optimism)    |
-|    ↳ resolvePrice()      |
-+-----------+--------------+
-            |
-            v
-+--------------------------+
-| CrossChainPriceResolver  |
-+-----------+--------------+
-            |
-            v
-+--------------------------+
-| CrossChainMessenger      |
-| ↳ Sends req to UniChain  |
-+-----------+--------------+
-            |
-            v
-+--------------------------+
-| UniChainOracleRegistry   |
-| ↳ Adapter fetches price  |
-+--------------------------+
+```mermaid
+graph TD
+    subgraph "Chain A (e.g., Base Sepolia)"
+        A["TruncGeoOracleMulti (Uniswap V4 Oracle)"] -->|Fetch Price| B(PriceSenderAdapter)
+        B -->|sendMessage| C[L2ToL2CrossDomainMessenger Predeploy]
+        style C fill:#f9f,stroke:#333
+    end
+    
+    subgraph "Chain B (e.g., OP Sepolia)"
+        D[L2ToL2CrossDomainMessenger Predeploy] -->|Relayed Message| E(PriceReceiverResolver)
+        F[Your dApp] -->|getPrice| E
+        style D fill:#f9f,stroke:#333
+    end
+    
+    subgraph "Off-Chain Services"
+        G(Relay Service) -->|relayMessage| D
+        H(Trigger Service) -->|Triggers Price Update| B
+    end
+    
+    C -->|Optimism Cross-Chain Message| D
+
+    classDef predeploy fill:#f9f,stroke:#333
 ```
 
 ## 🎬 Demo Video
 
 Watch a demonstration of AnyPrice in action:
 
-[Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f3150995f4524a42838ce76505df4978?sid=e7088649-1748-458d-ad80-2eba9c9da8e1)
+[Watch the AnyPrice Demo on Loom](https://www.loom.com/share/f2402602fc534d9eafdf477428d8d53b?sid=0282eb3b-5422-4167-9516-a8375963c187)
+
+## 🚀 Running the Demo
+
+You can run AnyPrice in two ways:
+1. **Local Development** using `supersim` (recommended for testing)
+2. **Testnet Deployment** using OP Sepolia and Base Sepolia
+
+### Local Development with Supersim
+
+This is the fastest way to test AnyPrice without needing testnet ETH or faucets:
+
+1. **Install Dependencies**
+```bash
+# Install Foundry
+curl -L https://foundry.paradigm.xyz | bash
+foundryup
+
+# Install Node.js dependencies
+npm install
+
+# Install supersim
+brew install ethereum-optimism/tap/supersim
+```
+
+2. **Start Local L2 Chains**
+```bash
+# Start two L2 chains with auto-relaying enabled
+supersim --l2.count 2 --l2.starting.port 9545 --interop.autorelay
+```
+
+3. **Configure Environment**
+Create a `.env` file:
+```bash
+# Dev key that supersim prefunds
+PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+
+# Supersim RPC URLs
+RPC_URL_A=http://127.0.0.1:9545
+RPC_URL_B=http://127.0.0.1:9546
+
+# Supersim chain IDs
+CHAIN_ID_A=901
+CHAIN_ID_B=902
+
+# Will be filled after mock oracle deployment
+TRUNC_ORACLE_MULTI_ADDRESS_A=
+
+# Not needed for local dev
+ETHERSCAN_API_KEY_A=
+ETHERSCAN_API_KEY_B=
+```
+
+4. **Deploy Contracts**
+```bash
+# Deploy mock oracle to Chain A
+forge script script/DeployMockOracle.s.sol --broadcast --rpc-url $RPC_URL_A
+# Copy the deployed address to TRUNC_ORACLE_MULTI_ADDRESS_A in .env
+
+# Deploy main contracts
+forge script script/DeployL2L2.s.sol --broadcast --rpc-url $RPC_URL_A
+```
+
+5. **Test Price Updates**
+```bash
+# Get the deployed contract addresses
+SENDER=<PriceSenderAdapter address from deploy output>
+RESOLVER=<PriceReceiverResolver address from deploy output>
+
+# Send a price update from Chain A
+cast send --private-key $PRIVATE_KEY --rpc-url $RPC_URL_A $SENDER "publishPriceData(bytes32,int24,uint160,uint32)" \
+  0x0101010101010101010101010101010101010101010101010101010101010101 12345 5678901234567890123456789012 $(date +%s)
+
+# Read the price on Chain B
+cast call --rpc-url $RPC_URL_B $RESOLVER "getPrice(uint256,bytes32)(int24,uint160,uint32,bool)" \
+  901 0x0101010101010101010101010101010101010101010101010101010101010101
+```
+
+### Testnet Deployment
+
+For deploying to actual testnets, follow the detailed instructions in:
+
+➡️ **[SETUP.md](./SETUP.md)** ⬅️
+
+##  Running the Demo
+
+Detailed instructions for setting up the environment, deploying the contracts, running the relay service, and interacting with the system can be found in the dedicated setup guide:
+
+➡️ **[SETUP.md](./SETUP.md)** ⬅️
+
+Following that guide will walk you through:
+1. Setting up your environment variables (`.env`).
+2. Deploying the `PriceSenderAdapter` and `PriceReceiverResolver` contracts.
+3. Running the necessary message relaying service.
+4. Manually triggering price updates and reading them on the destination chain using `cast`.
+
+### Prerequisites Overview
+* Foundry (`forge`)
+* Node.js (`node`, `npm`)
+* RPC endpoints for two OP Stack L2 testnets (e.g., OP Sepolia & Base Sepolia)
+* A funded deployer wallet private key
+* **Crucially:** An address for a deployed `TruncGeoOracleMulti` contract on the source chain (Chain A). See [SETUP.md](./SETUP.md) for details on handling this dependency during testing.
 
 ## 🛠 Contracts Breakdown
 
-| Contract | Purpose |
-|----------|---------|
-| CrossChainPriceResolver | Main interface to fetch price |
-| CrossChainMessenger | Manages cross-chain messaging |
-| UniChainOracleRegistry | Maps symbols to adapters |
-| UniChainOracleAdapter | Fetches price from local oracle |
-| ICrossL2Inbox | Interface for message send |
-| IOptimismBridgeAdapter | Abstract bridge transport |
-| TruncOracleIntegration | Example integration |
-| OracleCrossChainDemo.s.sol | End-to-end test + deployment |
+| Contract                       | Chain | Purpose                                                                 | Key Features                                                              |
+|--------------------------------|-------|-------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| `PriceReceiverResolver.sol`    | B     | Receives, validates, stores prices                                      | L2-L2 Messenger Auth, Sender Validation, Freshness Check, `getPrice`      |
+| `PriceSenderAdapter.sol`       | A     | Fetches oracle prices, sends messages via L2-to-L2 Messenger             | Interfaces w/ Oracle, Calls `sendMessage`, `publishPriceData`             |
+| `TruncGeoOracleMulti.sol`      | A     | **(External)** Uniswap V4 Oracle providing TWAP-like data            | Multi-pool, Manipulation-resistant (Truncated Obs), Source of Truth     |
+| `TruncOracleIntegration.sol`   | A     | (Example) Connects Oracle to Sender Adapter, manages publishing       | Ownable, Authorization logic, Pool state tracking                         |
+| `DeployL2L2.s.sol`             | -     | Foundry script for deploying Adapter (A) & Resolver (B)                 | Reads `.env`, Handles cross-chain deployment logic                        |
+| `script/price-relay-service/`  | -     | Off-chain Node.js service for manual message relaying (Example)         | Polls Sender, Calls `relayMessage` on Chain B Messenger                     |
+| `L2ToL2CrossDomainMessenger`   | A & B | **(Optimism Predeploy)** Canonical contract handling L2-to-L2 messaging | `sendMessage`, `relayMessage`, Secure cross-domain context propagation    |
 
-## 🧪 Demo Walkthrough
-
-### Prerequisites
-* Foundry installed
-* Local forks or testnets for Optimism + UniChain
-* Set up .env with RPC URLs + private key
-
-### Running the Demo
-
-The easiest way to run the demo is using the provided shell script:
-
-```bash
-./script/demo-run.sh
-```
-
-This script will set up the necessary environment and run the demo end-to-end.
-
-### Manual Deployment
-
-If you prefer to deploy manually:
-
-```bash
-forge script script/OracleCrossChainDemo.s.sol \
-  --broadcast --verify --rpc-url $OPTIMISM_RPC
-```
-
-This:
-* Deploys the registry, adapters, resolver, and messenger
-* Registers symbols
-* Mocks oracle prices on UniChain
-
-### 2. Trigger Cross-Chain Price Fetch
-
-```solidity
-price = resolver.resolvePrice("ETH", uniChainId);
-```
-
-Behind the scenes:
-* Request is sent to UniChain
-* Adapter pulls price from native oracle
-* Response is sent back and cached locally
-
-### 3. Consume in Your App
-
-```solidity
-uint price = CrossChainPriceResolver.resolvePrice("DAI", uniChainId);
-doSomething(price);
-```
-
-## 🧠 Why This Matters
-
-| Feature | AnyPrice | Chainlink CCIP | Custom Relayers |
-|---------|----------|----------------|-----------------|
-| Modular Oracle Adapters | ✅ | ❌ | ❌ |
-| Works Across Any L2 | ✅ | ❓ | ✅ |
-| Native Oracle Format Support | ✅ | ❌ | ❓ |
-| Dev UX: Single Function Call | ✅ | ❌ | ❌ |
-
-## 💡 Extending It
-* Add adapters for Chainlink, Pyth, custom oracles
-* Plug into any app that uses price feeds (DEX, lending, liquidation bots)
-* Swap messaging layer with CCIP, Hyperlane, LayerZero if needed
-
-## 🏁 Final Thoughts
-
-AnyPrice makes cross-chain price feeds composable, modular, and dev-friendly.
-
-* No more waiting for someone to deploy Chainlink on your favorite L2.
-* No more brittle relayer scripts.
-* Just plug in and price.
 
 ## 🔒 Security Overview
 
-The AnyPrice Oracle system incorporates several security measures to ensure reliable and tamper-resistant cross-chain price data:
+AnyPrice relies on the security of the underlying Optimism L2-to-L2 messaging protocol and incorporates these key contract-level safeguards:
 
-### Cross-Chain Message Security
+* **Messenger Authentication:** `PriceReceiverResolver` only accepts messages from the official `L2ToL2CrossDomainMessenger` predeploy on its chain.
+* **Source Validation:** The receiver uses `crossDomainMessageContext()` to verify the message originates from a registered `PriceSenderAdapter` address on the expected source chain ID. Registration is owner-controlled.
+* **Freshness Checks:** The receiver rejects stale data based on timestamps and configurable thresholds (`freshnessThreshold`), mitigating replay of old prices.
+* **Access Controls:** Sensitive functions like source registration (`registerSource`) and triggering price sends (`publishPriceData`) are owner-restricted.
+* **Reentrancy Guard:** Used in `PriceReceiverResolver` to prevent reentrancy attacks.
+* **Oracle Data Quality:** The system's accuracy depends on the reliability and security of the source oracle (`TruncGeoOracleMulti`) on Chain A.
+* **Dependencies:** Relies on the security and liveness of Optimism's L2 messaging infrastructure and relayers.
 
-- **Optimism CrossL2Inbox Validation**: Uses Optimism's native cross-chain message verification to validate all cross-chain events.
-- **Chain ID Validation**: Ensures messages originate from the expected source chain.
-- **Source Address Validation**: Verifies messages come from registered and authorized oracles.
+## 🏁 Final Thoughts
 
-### Data Integrity Protections
-
-- **Replay Attack Prevention**: Implements multiple levels of replay protection:
-  - Unique event ID tracking using `keccak256(chainId, origin, logIndex, blockNumber)`
-  - Block number monotonicity enforcement
-  - Transaction-specific validation
-- **Finality Requirements**: Enforces minimum block confirmations before accepting cross-chain data to prevent reorganization attacks.
-- **Stale Data Prevention**: Rejects price data that exceeds configurable freshness thresholds.
-- **Timestamp Validation**: Checks for future timestamps and anomalous timestamp patterns.
-
-### Access Controls
-
-- **Source Registry**: Only accepts price updates from explicitly registered oracle adapters.
-- **Admin Functions**: Owner-only functions for managing sources, thresholds, and other sensitive parameters.
-- **Circuit Breaker**: Includes a pausable mechanism to halt price updates during emergencies.
-
-### Implementation Safeguards
-
-- **Reentrancy Protection**: Uses OpenZeppelin's `ReentrancyGuard` to prevent reentrancy attacks.
-- **Strict Data Validation**: Enforces extensive validation on all cross-chain messages.
-- **Chain-Specific Time Buffers**: Accounts for differences in block times across chains.
-- **Timeliness Checks**: Ensures that prices are current and representative.
-
-### Security Best Practices
-
-- **Immutable Core Components**: Critical components like chain IDs and oracle references are immutable.
-- **Defensive Programming**: Uses custom error types and robust error handling.
-- **Comprehensive Event Emission**: Extensive event logging for off-chain monitoring and forensics.
-- **Incremental Updates**: Smart freshness checks that only accept newer data than what's already stored.
-
-### Known Limitations
-
-- **Cross-Chain Messaging Dependency**: Relies on the security of the underlying cross-chain messaging protocol.
-- **Oracle Data Quality**: Depends on the accuracy of the source oracle implementations.
-- **Block Timestamp Reliance**: Some security features depend on block timestamps, which can be slightly manipulated by validators.
-
-For security disclosures or concerns, please contact the project maintainer directly.
+AnyPrice offers a modular, developer-friendly approach to cross-chain price feeds within the Optimism ecosystem and beyond, leveraging native L2 interoperability and next-generation Uniswap V4 oracle capabilities.
 
 ## 👨‍💻 Author
 

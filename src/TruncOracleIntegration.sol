@@ -4,15 +4,16 @@ pragma solidity ^0.8.26;
 import {PoolId, PoolIdLibrary} from "v4-core/src/types/PoolId.sol";
 import {PoolKey} from "v4-core/src/types/PoolKey.sol";
 import {TruncGeoOracleMulti} from "./TruncGeoOracleMulti.sol";
-import {UniChainOracleAdapter} from "./UniChainOracleAdapter.sol";
-import {UniChainOracleRegistry} from "./UniChainOracleRegistry.sol";
+import {PriceSenderAdapter} from "./PriceSenderAdapter.sol";
+import {IL2ToL2CrossDomainMessenger} from "@eth-optimism/contracts-bedrock/interfaces/L2/IL2ToL2CrossDomainMessenger.sol";
+import {Predeploys} from "@eth-optimism/contracts-bedrock/src/libraries/Predeploys.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
  * @title TruncOracleIntegration
  * @notice Integration contract connecting TruncGeoOracleMulti to the cross-chain oracle system
- * @dev Manages the oracle adapter and handles pool data publishing with proper authentication
+ * @dev Manages the PriceSenderAdapter and handles pool data publishing with proper authentication
  */
 contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     // Custom errors
@@ -35,13 +36,10 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
     TruncGeoOracleMulti public immutable truncGeoOracle;
     
     // The oracle adapter for cross-chain publishing
-    UniChainOracleAdapter public immutable oracleAdapter;
+    PriceSenderAdapter public immutable priceSenderAdapter;
     
     // The FullRange hook address
     address public immutable fullRangeHook;
-    
-    // The oracle registry
-    UniChainOracleRegistry public oracleRegistry;
     
     // Packed pool states with comprehensive tracking
     mapping(bytes32 => PoolState) public poolStates;
@@ -64,12 +62,16 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
      * @notice Constructor
      * @param _truncGeoOracle The truncated oracle
      * @param _fullRangeHook The FullRange hook address
-     * @param _registryAddress The oracle registry address (optional)
+     * @param _targetChainId The chain ID where the resolver is deployed
+     * @param _targetResolverAddress The address of the resolver on the target chain
+     * @param _messengerAddress The address of the L2-L2 messenger (use address(0) for default predeploy)
      */
     constructor(
         TruncGeoOracleMulti _truncGeoOracle,
         address _fullRangeHook,
-        address _registryAddress
+        uint256 _targetChainId,
+        address _targetResolverAddress,
+        address _messengerAddress
     ) Ownable(msg.sender) {
         truncGeoOracle = _truncGeoOracle;
         fullRangeHook = _fullRangeHook;
@@ -82,38 +84,28 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         // Additional validation for zero addresses
         if (address(_truncGeoOracle) == address(0)) revert ZeroAddressNotAllowed("truncGeoOracle");
         if (_fullRangeHook == address(0)) revert ZeroAddressNotAllowed("fullRangeHook");
+        if (_targetResolverAddress == address(0)) revert ZeroAddressNotAllowed("targetResolverAddress");
         
         // Add the hook to authorized callers
         authorizedCallers[_fullRangeHook] = true;
         emit CallerAuthorized(_fullRangeHook);
         
-        // Deploy the adapter that will publish oracle data to the cross-chain system
-        oracleAdapter = new UniChainOracleAdapter(_truncGeoOracle);
+        // Determine messenger address
+        IL2ToL2CrossDomainMessenger messenger = (_messengerAddress == address(0)) 
+            ? IL2ToL2CrossDomainMessenger(Predeploys.L2_TO_L2_CROSS_DOMAIN_MESSENGER)
+            : IL2ToL2CrossDomainMessenger(_messengerAddress);
+        
+        // Deploy the sender adapter 
+        priceSenderAdapter = new PriceSenderAdapter(
+            _truncGeoOracle,
+            _targetChainId,
+            _targetResolverAddress,
+            messenger
+        );
         
         // Add the adapter to authorized callers
-        authorizedCallers[address(oracleAdapter)] = true;
-        emit CallerAuthorized(address(oracleAdapter));
-        
-        // Connect to existing registry or deploy a new one
-        if (_registryAddress != address(0)) {
-            oracleRegistry = UniChainOracleRegistry(_registryAddress);
-        } else {
-            // Deploy a new registry
-            oracleRegistry = new UniChainOracleRegistry();
-            
-            // Register our adapter in the new registry
-            bytes32 adapterId = oracleRegistry.generateAdapterId(address(oracleAdapter));
-            oracleRegistry.registerAdapter(
-                adapterId,
-                block.chainid,
-                address(oracleAdapter),
-                "TruncGeoOracle Adapter",
-                "Cross-chain adapter for truncated geometric mean oracle"
-            );
-            
-            // Transfer ownership of the registry to the contract owner
-            oracleRegistry.transferOwnership(owner());
-        }
+        authorizedCallers[address(priceSenderAdapter)] = true;
+        emit CallerAuthorized(address(priceSenderAdapter));
     }
     
     /**
@@ -132,7 +124,7 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
      */
     function deauthorizeCaller(address caller) external onlyOwner {
         // Don't deauthorize critical components
-        if (caller == fullRangeHook || caller == address(oracleAdapter)) {
+        if (caller == fullRangeHook || caller == address(priceSenderAdapter)) {
             revert ZeroAddressNotAllowed("Cannot deauthorize critical components");
         }
         authorizedCallers[caller] = false;
@@ -170,25 +162,19 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
             revert Unauthorized(msg.sender);
         }
         
-        try oracleAdapter.publishPoolData(key) {
-            emit PoolDataPublished(poolIdBytes);
-            
-            // Update state efficiently
-            state.consecutiveFailures = 0;
-            state.lastSuccessTimestamp = uint32(block.timestamp);
-            state.lastUpdateTimestamp = uint32(block.timestamp);
-            
-            // Clear alert flag if it was set
-            if (state.hasActiveAlert) {
-                state.hasActiveAlert = false;
-                emit AlertCleared(poolIdBytes);
-            }
-        } catch Error(string memory reason) {
-            _handlePublishFailure(poolIdBytes, reason);
-            revert OracleUpdateFailed(poolIdBytes, reason);
-        } catch (bytes memory) {
-            _handlePublishFailure(poolIdBytes, "unknown error");
-            revert OracleUpdateFailed(poolIdBytes, "unknown error");
+        // Call the new adapter directly, allowing reverts to propagate
+        priceSenderAdapter.publishPoolData(key);
+        emit PoolDataPublished(poolIdBytes);
+        
+        // Update state efficiently (only reached if adapter call succeeds)
+        state.consecutiveFailures = 0;
+        state.lastSuccessTimestamp = uint32(block.timestamp);
+        state.lastUpdateTimestamp = uint32(block.timestamp);
+        
+        // Clear alert flag if it was set
+        if (state.hasActiveAlert) {
+            state.hasActiveAlert = false;
+            emit AlertCleared(poolIdBytes);
         }
     }
     
@@ -214,43 +200,20 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         
         // Check if the oracle should be updated
         if (truncGeoOracle.shouldUpdateOracle(pid)) {
-            try oracleAdapter.publishPoolData(key) {
-                emit PoolDataPublished(poolIdBytes);
-                
-                // Update state efficiently
-                state.consecutiveFailures = 0;
-                state.lastSuccessTimestamp = uint32(block.timestamp);
-                state.lastUpdateTimestamp = uint32(block.timestamp);
-                
-                // Clear alert flag if it was set
-                if (state.hasActiveAlert) {
-                    state.hasActiveAlert = false;
-                    emit AlertCleared(poolIdBytes);
-                }
-            } catch Error(string memory reason) {
-                _handlePublishFailure(poolIdBytes, reason);
-                // Note: We do not revert here to prevent breaking the hook callback chain
-            } catch (bytes memory) {
-                _handlePublishFailure(poolIdBytes, "unknown error");
-                // Note: We do not revert here to prevent breaking the hook callback chain
+            // Call the new adapter directly - Reverts will propagate and fail the hook callback
+            priceSenderAdapter.publishPoolData(key);
+            emit PoolDataPublished(poolIdBytes);
+            
+            // Update state efficiently (only reached if adapter call succeeds)
+            state.consecutiveFailures = 0;
+            state.lastSuccessTimestamp = uint32(block.timestamp);
+            state.lastUpdateTimestamp = uint32(block.timestamp);
+            
+            // Clear alert flag if it was set
+            if (state.hasActiveAlert) {
+                state.hasActiveAlert = false;
+                emit AlertCleared(poolIdBytes);
             }
-        }
-    }
-    
-    /**
-     * @notice Internal helper function to handle oracle update failures
-     * @param poolIdBytes The ID of the pool that failed
-     * @param reason The reason for the failure
-     */
-    function _handlePublishFailure(bytes32 poolIdBytes, string memory reason) internal {
-        PoolState storage state = poolStates[poolIdBytes];
-        state.consecutiveFailures++;
-        state.lastUpdateTimestamp = uint32(block.timestamp);
-        
-        // Only emit alert once until it's cleared
-        if (state.consecutiveFailures >= MAX_FAILURES_BEFORE_ALERT && !state.hasActiveAlert) {
-            state.hasActiveAlert = true;
-            emit OracleUpdateAlert(poolIdBytes, reason, state.consecutiveFailures);
         }
     }
     
@@ -266,6 +229,6 @@ contract TruncOracleIntegration is Ownable, ReentrancyGuard {
         int24 tick,
         uint160 sqrtPriceX96
     ) {
-        return oracleAdapter.getLatestPoolData(key);
+        return priceSenderAdapter.getLatestPoolData(key);
     }
 }

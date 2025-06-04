@@ -1,0 +1,4 @@
+forge-std/=lib/forge-std/src/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+v4-core/=lib/v4-core/
+@eth-optimism/contracts-bedrock/=lib/node_modules/@eth-optimism/contracts-bedrock/
